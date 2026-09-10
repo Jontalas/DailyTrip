@@ -1,6 +1,6 @@
 {
   "name": "travel-planner",
-  "version": "1.2.32",
+  "version": "1.2.33",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "node --check server.js",
-    "test": "node --test scripts/regression.test.mjs scripts/route-search.test.mjs scripts/day-plan.test.mjs",
+    "test": "node --test scripts/regression.test.mjs scripts/route-search.test.mjs scripts/day-plan.test.mjs scripts/ai-curator.test.mjs",
     "test:ui": "node scripts/regression-ui.mjs"
   },
   "engines": {

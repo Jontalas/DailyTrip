@@ -370,6 +370,8 @@ Variables actuales:
 PORT
 GEOAPIFY_API_KEY
 GOOGLE_PLACES_API_KEY
+GEMINI_API_KEY          # opcional: curación por IA (aditiva). Ver §46.8.
+GEMINI_MODEL            # opcional: por defecto gemini-flash-lite-latest
 NOMINATIM_URL
 OSRM_URL
 OVERPASS_URL
@@ -392,6 +394,13 @@ Debe tratarse como secreto.
 Implementado como proveedor opcional de respaldo.
 
 Puede estar sin configurar.
+
+## Gemini (GEMINI_API_KEY / GEMINI_MODEL)
+
+Curación por IA **aditiva** (v1.2.33). Sin clave, el descubrimiento funciona
+igual. La clave está en el `.env` entregado y como secreto `sync:false` en
+Render. **No copiar su valor a documentación, logs, UI ni repos.** Detalle de
+diseño y guardarraíles en §46.8.
 
 ## DEBUG_EXTERNAL
 
@@ -2410,6 +2419,54 @@ Al crearla:
 ---
 
 # 43. CHANGELOG DE CONTINUIDAD
+
+## v1.2.33 — Curación por IA (Gemini, aditiva) + lista de paradas en ruta sin tope
+
+- **Motivo.** (1) La lista de la izquierda de "Paradas en ruta" mostraba sólo las
+  55 de más interés (`ROUTE_CAP`) mientras el mapa pintaba las ~150: al pulsar un
+  pin que no estaba entre esas 55 no había fila a la que saltar. (2) Se pide una
+  capa de IA que aporte lugares y **ordene** las listas por su recomendación
+  (§46.8 pasa de propuesta a implementada).
+- **Cambios.**
+  - `client/src/components/OptionsPanel.svelte`: se elimina `ROUTE_CAP`. La lista
+    de paradas en ruta muestra **todas** las del pool (las mismas que el mapa);
+    el `scroll-y` del contenedor basta. Se quita el `<p class="hint">` y su
+    selector CSS.
+  - **Nuevo `lib/ai-curator.js`.** `aiCuratePlaces({kind:"route"|"activities",…})`
+    llama a Google Gemini (REST `generativelanguage`, sin dependencia npm).
+    Devuelve `{suggestions:[{name,locality,category,interest,reason}], ranking}`.
+    Rol acotado: **sólo nombres + nota 0-100**; nunca coords ni horarios. Caché
+    interna 24 h por prompt, reintento corto ante "high demand", nunca lanza.
+    Helpers puros `normName`, `aiRank`, `applyAiRanking` (orden por nota de IA
+    con fallback a `interestScore`; lo que la IA no menciona **no se oculta**).
+    Modelo por defecto `gemini-flash-lite-latest` (`GEMINI_MODEL` lo cambia).
+  - `server.js`:
+    - `GEMINI_KEY` nuevo secreto. `aiPlaceCandidates()` geocodifica cada nombre
+      de la IA con `wikiPlaceCoord` y, si falla, `geocode` (Nominatim); descarta
+      lo que no se localiza o cae fuera del corredor/radio. Entra al pool como
+      `source:"ai"` y pasa por `prepare`/`enrichInterest`/`mergeRoutePlaces`.
+    - `discoverRouteStops`: `aiRouteSuggestions()` corre en el `Promise.all` con
+      `corridorLandmarks` y `searchRoutePlaces`, con **tope de espera
+      `AI_DEADLINE_MS=12 s`** (si lo supera se sirve sin IA y el resultado **no
+      se cachea como final** — `aiPending` — para que la siguiente búsqueda lo
+      recoja de la caché ya caliente). Orden final por `rankScore` (nota de IA →
+      `interestScore`). `coverage.ai` informa `{ok,suggested,added,timedOut?}`.
+      Cache key `routeStops:v26:` → `routeStops:v27:`.
+    - `robustDestinationContent` (sólo `activities`): job de IA análogo con el
+      mismo tope y gate de caché (`aiComplete`). `content:v8:` → `content:v9:`.
+    - `/api/providers` añade `ai:{configured,role}`.
+  - `lib/destination-options.js`: `topInterest(items,target,score?)` acepta un
+    scorer opcional (por defecto `interestScore`, sin cambio de comportamiento).
+  - `.env(.example)`, `render.yaml`: `GEMINI_API_KEY` (secreto, `sync:false`) y
+    `GEMINI_MODEL`.
+- **Impacto medido.** Málaga→Almería: primera búsqueda sin caché sirve en ~12 s
+  (IA a veces excede el tope por picos de "high demand" de Gemini); la siguiente
+  ya trae la IA y queda cacheada (20 ms). Con IA, la Cueva de Nerja pasa de la
+  posición ~30 (interés 54) al **puesto 1** (nota IA 92); Balcón de Europa y
+  Castillo de Santa Ana entran como paradas nuevas geolocalizadas.
+- **Validación.** `npm test` 56/56 (nuevo `scripts/ai-curator.test.mjs`, 9
+  casos); `node --check server.js`; `npm run build`; prueba en vivo Málaga→Almería
+  y Nerja.
 
 ## v1.2.32 — Búsqueda de paradas en ruta mucho más rápida
 
@@ -5100,34 +5157,46 @@ transiciones `fly`; con `prefers-reduced-motion` devuelven 0. La regla global de
 - **Cargar viaje**: botón en la tarjeta de búsqueda (y en la hoja «search` de
   móvil) → `<input type=file>` oculto → `applyTrip()` valida `v` y vuelca todo.
 
-## 46.8. Capa de IA para curación de sitios (propuesta, no implementada)
+## 46.8. Capa de IA para curación de sitios (implementada en v1.2.33, aditiva)
 
-Evaluado a raíz de la lentitud del barrido de Wikipedia y de la dificultad para
-que hitos como la Cueva de Nerja aparezcan siempre. **Es factible y encaja bien.**
+Módulo `lib/ai-curator.js` + `GEMINI_API_KEY`. Sin clave, todo el descubrimiento
+funciona igual con Wikipedia/Geoapify/OSM: la IA **suma**, no es un requisito.
 
-- **Modelo/API.** Google Gemini Flash (ya usado en OVFutbol7: `@google/genai`,
-  clave). Latencia ~1-3 s, plan gratuito holgado. La llamada debe ser
-  **server-side** (`GEMINI_API_KEY` como los demás secretos), no en el navegador.
-- **Rol: curación/sugerencia, NO fuente de datos.** El LLM propone NOMBRES de
-  lugares interesantes del corredor / del destino (+ una frase de por qué + una
-  nota 0-100 de «merece un desvío»). Cada nombre se **geocodifica con Nominatim**
-  (ya en uso, gratis) para obtener coordenadas reales y confirmar que existe; el
-  que no geocodifica o cae fuera del corredor ±10 km se descarta. Entra al pool
-  de candidatos como un proveedor más (`source:"ai"`), y pasa por el mismo
-  `prepare`/`enrichInterest`/`selectRoutePlaces`.
-- **Guardarraíl (principio §2.4).** Nunca se confían coordenadas ni horarios del
-  LLM. Su salida sólo decide «qué nombres merece la pena mostrar»; el resto del
-  pipeline valida.
-- **Beneficios.** (1) Velocidad: 1 llamada + geocodificación en paralelo (~5 s)
-  puede sustituir el barrido multi-proveedor de Wikipedia (~10-40 s). (2)
-  Fiabilidad: un LLM conoce los hitos de cualquier ruta de España; adiós a las
-  peleas con el rate-limit de Wikipedia. (3) Descripciones para lugares sin
-  artículo de Wikipedia.
-- **Riesgos.** Alucinación (mitigada por la geocodificación obligatoria); nombres
-  ambiguos (geocodificar con la región como contexto + filtro de corredor);
-  no-determinismo (`temperature` baja + caché por corredor); dependencia de un
-  servicio de Google.
-- **Plan sugerido.** Empezar como proveedor **aditivo** (IA + Wikipedia/Geoapify/
-  OSM, todo validado por geocodificación), medir calidad, y luego valorar hacerlo
-  primario y adelgazar el barrido de Wikipedia. Requiere decisión de producto y
-  la clave de API antes de construirlo.
+- **Modelo/API.** Google Gemini vía REST `generativelanguage.googleapis.com`
+  (`:generateContent`), **sin dependencia npm** (fetch directo, como el resto de
+  proveedores). Server-side (`GEMINI_API_KEY` secreto). Modelo por defecto
+  `gemini-flash-lite-latest`; `GEMINI_MODEL` lo sobrescribe. `responseMimeType:
+  application/json` + `responseSchema`. `temperature 0.2`. Timeout 10 s/intento,
+  1 reintento ante "high demand"/429/5xx.
+- **Rol: curación y ORDEN, NO fuente de datos.** `aiCuratePlaces()` devuelve
+  `suggestions:[{name,locality,category,interest 0-100,reason}]` y un `ranking`
+  `{normName: interest}`. `aiPlaceCandidates()` (en `server.js`) geocodifica cada
+  nombre con `wikiPlaceCoord` y, si falla, `geocode` (Nominatim); descarta lo que
+  no se localiza o cae fuera del corredor (±12 km, filtro real a ±10 en
+  `prepare`) o del radio del destino. Entra al pool como `source:"ai"`,
+  `verified:true`, `aiInterest`, `aiReason`, y pasa por `prepare`/`enrichInterest`
+  /`mergeRoutePlaces` como cualquier otro.
+- **Orden de las listas.** `aiRank(item,ranking)` = nota de la IA si opinó sobre
+  ese nombre (por `normName`), si no `interestScore`. `applyAiRanking` /
+  `selectRoutePlaces(...,rankScore)` / `topInterest(...,scorer)` ordenan por esa
+  nota. **Lo que la IA no menciona NO se oculta ni se hunde**: conserva su lugar
+  por `interestScore` (principio §2.x "nunca ocultar opciones").
+- **Guardarraíl (principio §2.4).** Nunca se usan coordenadas, horarios ni webs
+  del LLM. Su salida sólo decide "qué nombres mostrar y en qué orden".
+- **Ruta crítica.** `AI_DEADLINE_MS = 12 s`. Si la IA lo supera (picos de "high
+  demand" de Gemini), la respuesta se sirve **sin** IA y **no se cachea como
+  final** (`aiPending` en `discoverRouteStops`, `aiComplete` en
+  `robustDestinationContent`): la llamada acaba en segundo plano y deja el
+  resultado en la caché interna de `aiCuratePlaces` (24 h), de modo que la
+  siguiente búsqueda del mismo corredor/destino ya la incorpora y entonces sí se
+  cachea (`routeStops:v27:`, `content:v9:`).
+- **Puntos de integración.** `discoverRouteStops` (paradas en ruta) y
+  `robustDestinationContent` con `kind==='activities'`. Comida/cena/alojamiento
+  todavía **no** usan IA (mismo patrón si se quisiera: job de IA + `aiRanking` +
+  `topInterest` con scorer).
+- **Verificado.** Málaga→Almería: la Cueva de Nerja sube de ~puesto 30 (interés
+  54) al 1 (nota IA 92); Balcón de Europa / Castillo de Santa Ana entran como
+  paradas nuevas ya geolocalizadas. Tests: `scripts/ai-curator.test.mjs`.
+- **Siguiente paso posible.** Si la calidad se confirma, hacer la IA el proveedor
+  primario del corredor y adelgazar el barrido de Wikipedia (`corridorLandmarks`
+  + pasada profunda), que es el 429 que aún alarga la cola.

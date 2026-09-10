@@ -10,6 +10,7 @@ import { routeDay } from "./lib/day-routing.js";
 import { destinationScale, topInterest, latestPopulation } from "./lib/destination-options.js";
 import { placeContent } from "./lib/place-content.js";
 import { routeStopTarget, routeGeometryIndex, mergeRoutePlaces, selectRoutePlaces, searchRoutePlaces, pagedPlaces, subdividedPlaces, isRouteLandmark } from "./lib/route-search.js";
+import { aiCuratePlaces, aiConfigured, applyAiRanking, aiRank, normName } from "./lib/ai-curator.js";
 import { fileURLToPath } from "node:url";
 
 // Node puede usar un almacén distinto al de Windows. Añadir las CA del sistema
@@ -36,7 +37,8 @@ const OVERPASS_ENDPOINTS=[
 
 const GEOAPIFY_KEY=(process.env.GEOAPIFY_API_KEY||"").trim();
 const GOOGLE_KEY=(process.env.GOOGLE_PLACES_API_KEY||"").trim();
-const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.32 (personal-use)";
+const GEMINI_KEY=(process.env.GEMINI_API_KEY||"").trim();
+const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.33 (personal-use)";
 const DEBUG_EXTERNAL=process.env.DEBUG_EXTERNAL==="1";
 const debug=(...a)=>{if(DEBUG_EXTERNAL)console.warn(...a);};
 
@@ -1229,14 +1231,32 @@ async function localityProfile(destination) {
 const destinationRequests=new Map();
 async function robustDestinationContent(kind,destination){
   const profile=await localityProfile(destination);
-  const key=`content:v8:${kind}:${destination.lat}:${destination.lon}:${profile.tier}`;
+  const key=`content:v9:${kind}:${destination.lat}:${destination.lon}:${profile.tier}`;
   const fresh=cacheGet(key);
   if(fresh)return fresh.data;
   if(destinationRequests.has(key))return destinationRequests.get(key);
   const task=(async()=>{
     const radius=profile.radiusKm*1000,target=profile.targets[kind],all=[],errors=[],sources=[];
+    let aiRanking={},aiComplete=true;
     const collect=async(name,job)=>{try{all.push(...await job());sources.push(name);}catch(e){errors.push(name);debug(name,e.message);}};
     const jobs=[];
+    // Curación por IA (sólo actividades). Aditiva: propone nombres, se geocodifican
+    // y validan contra el radio del destino; su nota ordena la lista. Con tope de
+    // espera: si la IA tarda o falla, se sigue sin ella y el resultado NO se
+    // cachea como final (la siguiente carga reintenta con la caché ya caliente).
+    // Ver §46.8.
+    if(kind==='activities' && GEMINI_KEY) jobs.push((async()=>{
+      try{
+        const cur=await Promise.race([
+          aiCuratePlaces({kind:'activities',area:destination.name,radiusKm:profile.radiusKm}),
+          new Promise((_,rej)=>setTimeout(()=>rej(new Error('ai-deadline')),AI_DEADLINE_MS))
+        ]);
+        aiRanking=cur.ranking||{};
+        if(cur.source==='error'){aiComplete=false;debug('ai',cur.error);return;}
+        if(cur.suggestions.length)all.push(...await aiPlaceCandidates(cur.suggestions,{near:destination,radiusKm:profile.radiusKm,cap:16}));
+        sources.push('ai');
+      }catch(e){aiComplete=false;debug('ai',e.message);}
+    })());
     if(kind==='activities') jobs.push(collect('wikipedia',async()=>{
       const out=[],latSpan=profile.radiusKm/111,lonSpan=latSpan/Math.cos(destination.lat*Math.PI/180),detailCache=new Map();
       const box=[destination.lat+latSpan,destination.lon-lonSpan,destination.lat-latSpan,destination.lon+lonSpan];
@@ -1265,11 +1285,12 @@ async function robustDestinationContent(kind,destination){
     const eligible=all.filter(x=>Number.isFinite(x.lat) && Number.isFinite(x.lon) && x.name && x.hasPlaceName!==false
       && haversineKm(x,destination)<=profile.radiusKm && norm(x.name)!==norm(destination.name)
       && !(kind==='activities' && (ROUTE_SKIP_SETTLEMENT.test(x.shortDesc||'') || WIKI_SETTLEMENT_LEAD.test((x.description||'').slice(0,140)))));
-    const ranked=enrichInterest(mergeRoutePlaces(eligible),destination.name);
-    const items=topInterest(ranked,target);
+    const ranked=enrichInterest(mergeRoutePlaces(eligible),destination.name)
+      .map(x=>({...x,aiInterest:x.aiInterest ?? aiRanking[normName(x.name)] ?? null}));
+    const items=topInterest(ranked,target,x=>aiRank(x,aiRanking));
     const result={status:errors.length?'partial':'ok',source:sources.join('+')||'none',items,
-      selection:{target,available:ranked.length,returned:items.length,profile,ranking:'interest',complete:!errors.length,errors}};
-    if(!errors.length)cacheSet(key,result);
+      selection:{target,available:ranked.length,returned:items.length,profile,ranking:Object.keys(aiRanking).length?'ai+interest':'interest',complete:!errors.length,errors}};
+    if(!errors.length && aiComplete)cacheSet(key,result);
     return result;
   })().finally(()=>destinationRequests.delete(key));
   destinationRequests.set(key,task);return task;
@@ -1392,7 +1413,7 @@ async function robustRouteStops(route,destination){
   const index=routeGeometryIndex(route.coords);
   const target=routeStopTarget(route.roadKm ?? index.total);
   const fingerprint=createHash("sha256").update(JSON.stringify({coords:route.coords,destination,target})).digest("hex").slice(0,24);
-  const key=`routeStops:v26:${fingerprint}`;
+  const key=`routeStops:v27:${fingerprint}`;
   const fresh=cacheGet(key);
   // Un resultado bajo el objetivo nunca evita una nueva búsqueda.
   if(fresh?.data?.coverage?.outcome==="target-reached" && fresh.data.items.length>=target)
@@ -1401,6 +1422,71 @@ async function robustRouteStops(route,destination){
   const work=discoverRouteStops(route,destination,index,target,key);
   routeSearchInFlight.set(key,work);
   try{return await work;}finally{routeSearchInFlight.delete(key);}
+}
+
+// Convierte las sugerencias de la IA (que son SÓLO nombres + una nota) en
+// candidatas reales: geocodifica cada nombre con Wikipedia y, si falla, con
+// Nominatim, y descarta las que no se localizan o caen fuera del área. NUNCA se
+// usan coordenadas ni horarios que devuelva la IA. Ver doc §46.8.
+const AI_CATEGORY_KEYWORD={museum:"museum",historic:"historic",viewpoint:"viewpoint",nature:"natural",park:"park",beach:"beach",attraction:"attraction",restaurant:"restaurant"};
+async function aiPlaceCandidates(suggestions,{near=null,routeIndex=null,radiusKm=12,cap=14,endpoints=null}={}){
+  const list=(suggestions||[]).slice(0,cap);
+  const out=[];
+  for(let i=0;i<list.length;i+=4){
+    const batch=await Promise.all(list.slice(i,i+4).map(async s=>{
+      const name=String(s?.name||"").trim();
+      if(!name)return null;
+      let coord=null;
+      try{coord=await wikiPlaceCoord(name,near||undefined);}catch{coord=null;}
+      if(!coord){
+        try{
+          const g=await geocode([name,s.locality].filter(Boolean).join(", "),{place:true});
+          if(g&&Number.isFinite(g.lat))coord={lat:g.lat,lon:g.lon};
+        }catch{coord=null;}
+      }
+      if(!coord||!Number.isFinite(coord.lat))return null;
+      if(routeIndex){
+        if(routeIndex.locate(coord).distanceToRouteKm>radiusKm)return null;
+      }else if(near&&haversineKm(coord,near)>radiusKm)return null;
+      if(endpoints&&endpoints.some(p=>haversineKm(coord,p)<3))return null;
+      const cat=AI_CATEGORY_KEYWORD[s.category]||"attraction";
+      return{
+        id:`ai:${norm(name)}`,name,lat:coord.lat,lon:coord.lon,
+        category:cat,categories:[cat],
+        description:s.reason||"",shortDesc:"",
+        durationMin:durationFor(cat),website:"",openingHours:"",cuisine:"",
+        wikipediaUrl:"",infoUrl:"",imageUrl:"",imageAttribution:"",
+        rating:null,userRatingCount:null,
+        source:"ai",verified:true,aiInterest:s.interest,aiReason:s.reason||""
+      };
+    }));
+    out.push(...batch.filter(Boolean));
+  }
+  return out;
+}
+
+// Tope de espera de la IA en la ruta crítica: si tarda más, se sigue sin ella
+// (la llamada acaba en segundo plano y deja el resultado en caché para la
+// siguiente búsqueda, que NO se cachea como final mientras la IA no haya
+// respondido — ver `aiPending` en discoverRouteStops).
+const AI_DEADLINE_MS=12000;
+// Sugerencias de la IA para el corredor de una ruta, ya geocodificadas y
+// filtradas al corredor. Aditivo y no bloqueante: si no hay clave, falla o
+// excede el tope, devuelve vacío y el descubrimiento sigue igual.
+async function aiRouteSuggestions(route,destination,index){
+  if(!GEMINI_KEY)return {candidates:[],ranking:{},meta:{ok:true,suggested:0}};
+  const origin=route.coords[0];
+  const run=(async()=>{
+    const from=(await reverseGeocode(origin.lat,origin.lon).catch(()=>null))?.name||"";
+    const cur=await aiCuratePlaces({kind:"route",from,to:destination.name,roadKm:Math.round(route.roadKm||index.total)});
+    if(cur.source==="error")return {candidates:[],ranking:{},meta:{ok:false,error:cur.error}};
+    const candidates=cur.suggestions.length
+      ? await aiPlaceCandidates(cur.suggestions,{routeIndex:index,radiusKm:12,cap:16,endpoints:[origin,destination]})
+      : [];
+    return {candidates,ranking:cur.ranking,meta:{ok:true,suggested:cur.suggestions.length,added:candidates.length}};
+  })().catch(e=>({candidates:[],ranking:{},meta:{ok:false,error:e?.message||String(e)}}));
+  const deadline=new Promise(r=>setTimeout(()=>r({candidates:[],ranking:{},meta:{ok:false,timedOut:true}}),AI_DEADLINE_MS));
+  return Promise.race([run,deadline]);
 }
 
 async function discoverRouteStops(route,destination,index,target,key){
@@ -1470,25 +1556,35 @@ async function discoverRouteStops(route,destination,index,target,key){
   });
   // Hitos del corredor y búsqueda general EN PARALELO (el pool de concurrencia de
   // `wikiJson` ya evita el 429). Ambos pasan por `prepare` antes de puntuarse.
-  const [corridorHits,found]=await Promise.all([
+  const [corridorHits,ai,found]=await Promise.all([
     corridorLandmarks(index).catch(()=>[]),
+    aiRouteSuggestions(route,destination,index).catch(()=>({candidates:[],ranking:{},meta:{suggested:0}})),
     searchRoutePlaces({centers:index.centers,providers,target,prepare,pause:()=>sleep(120)})
   ]);
-  const ranked=enrichInterest(prepare([...corridorHits,...found.candidates]),destination.name);
+  const ranked=enrichInterest(prepare([...corridorHits,...ai.candidates,...found.candidates]),destination.name)
+    .map(x=>({...x,aiInterest:x.aiInterest ?? ai.ranking[normName(x.name)] ?? null}));
+  const rankScore=x=>aiRank(x,ai.ranking);
   // Se devuelven MUCHAS más candidatas que el objetivo mínimo (`target`): el
   // cliente reordena por "qué te apetece hoy" y así puede sacar a flote paradas
   // que quedaban justo por debajo del corte de interés bruto. La lista visible
   // la acota el propio cliente. `coverage.target` sigue siendo el mínimo.
-  const primary=selectRoutePlaces(ranked,Math.max(90,target*3));
+  // El interés efectivo prioriza la recomendación de la IA cuando opinó sobre la
+  // parada (por nombre); si no, el `interestScore` calculado. Así la lista queda
+  // ordenada "por lo que recomienda la IA" sin ocultar lo que la IA no menciona.
+  const primary=selectRoutePlaces(ranked,Math.max(90,target*3),rankScore);
   // Garantía de hitos: un sitio de notabilidad indiscutible dentro del corredor
   // (p. ej. la Cueva de Nerja) se incluye SIEMPRE, aunque no entre en el
   // objetivo de ~1 parada / 4 km. Sin tope: la barra de notabilidad ya limita.
   const kept=new Set(primary.map(x=>x.id));
   const landmarks=ranked.filter(x=>!kept.has(x.id) && isRouteLandmark(x));
-  let items=[...primary,...landmarks].sort((a,b)=>(b.interestScore||0)-(a.interestScore||0));
-  const coverage={...found.coverage,returned:items.length,landmarks:landmarks.length,centers:index.centers.length,rejected,providers:providers.map(p=>p.name)};
+  let items=[...primary,...landmarks].sort((a,b)=>rankScore(b)-rankScore(a) || (b.interestScore||0)-(a.interestScore||0));
+  const coverage={...found.coverage,returned:items.length,landmarks:landmarks.length,centers:index.centers.length,rejected,providers:providers.map(p=>p.name),ai:ai.meta};
   const result={status:coverage.outcome==="incomplete"?"partial":"ok",items,coverage,source:[...new Set(items.map(x=>x.source))].join("+")||"none"};
-  if(coverage.outcome==="target-reached")cacheSet(key,result);
+  // No se congela el resultado como final mientras la IA (configurada) no haya
+  // respondido: así la próxima búsqueda del corredor reintenta y recoge su
+  // aportación (que ya quedó en la caché interna de aiCuratePlaces).
+  const aiPending=GEMINI_KEY && ai.meta && ai.meta.ok===false;
+  if(coverage.outcome==="target-reached" && !aiPending)cacheSet(key,result);
   if(!items.length && coverage.outcome==="incomplete"){
     const stale=cacheGet(key,{allowStale:true});
     if(stale?.data?.items?.length)return {...result,items:stale.data.items,source:"cache-stale"};
@@ -1500,6 +1596,7 @@ async function discoverRouteStops(route,destination,index,target,key){
 app.get("/api/providers",(req,res)=>{
   res.json({
     wikipedia:{configured:true,role:"lugares notables + descripciones"},
+    ai:{configured:aiConfigured(),role:"curación y orden de la lista (aditivo)"},
     geoapify:{configured:Boolean(GEOAPIFY_KEY),role:"cobertura de lugares"},
     google:{configured:Boolean(GOOGLE_KEY),role:"respaldo opcional"},
     osm:{configured:true,role:"tercer nivel"},
@@ -1889,4 +1986,4 @@ app.post("/api/plan/route-via",async(req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Travel Planner 1.2.32 en http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`Travel Planner 1.2.33 en http://localhost:${PORT}`));

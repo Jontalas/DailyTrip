@@ -31,21 +31,12 @@
 
   let routeSel = $derived(new Set($selected.route.map((x) => x.id)));
   let actSel = $derived(new Set($selected.activities.map((x) => x.id)));
-  // El servidor devuelve muchas más paradas de ruta de las que caben en pantalla.
-  // `pools.route` ya viene ordenado por interés AJUSTADO con "qué te apetece hoy"
-  // (applyPreferences en App). Se muestran las N mejores; al cambiar una
-  // preferencia se reordena todo y cambian cuáles se ven. Las seleccionadas se
-  // muestran siempre. No se descarta nada por horario ni viabilidad (v1.2.24).
-  const ROUTE_CAP = 55;
+  // La lista de paradas en ruta muestra TODAS las que hay en el mapa: sin tope.
+  // Así, al pulsar un pin del mapa siempre hay una fila a la que saltar. `pools.route`
+  // ya viene ordenado por interés (recomendación de la IA + "qué te apetece hoy",
+  // applyPreferences en App). No se descarta nada por horario ni viabilidad.
   let allRoute = $derived((pools.route || []).filter((x) => !x.custom));
-  let routeOptions = $derived(
-    allRoute.length <= ROUTE_CAP
-      ? allRoute
-      : [
-          ...allRoute.slice(0, ROUTE_CAP),
-          ...allRoute.slice(ROUTE_CAP).filter((x) => routeSel.has(x.id))
-        ]
-  );
+  let routeOptions = $derived(allRoute);
 
   function lunchIsSelected(item) {
     return $selected.lunch?.id === item.id && $selected.lunch?.lunchPhase === item.lunchPhase;
@@ -164,9 +155,6 @@
 
 
     <div class="list scroll-y">
-      {#if allRoute.length > ROUTE_CAP}
-        <p class="hint">{allRoute.length} paradas posibles en el recorrido · mostrando las {ROUTE_CAP} de mayor interés según «qué te apetece hoy».</p>
-      {/if}
       {#each routeOptions as item (item.id)}
         <OptionCard
           {item}
@@ -383,8 +371,7 @@
     overflow-x: hidden;
     overscroll-behavior: contain;
   }
-  .empty,
-  .hint {
+  .empty {
     font-size: 11px;
     color: var(--text-faint);
     padding: 4px 6px;

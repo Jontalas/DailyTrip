@@ -21,8 +21,13 @@ services:
       # Opcional: respaldo de Google Places. Dejar vacío si no se usa.
       - key: GOOGLE_PLACES_API_KEY
         sync: false
+      # Opcional: curación por IA (Google Gemini). Aditivo; se rellena en el panel.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: "gemini-flash-lite-latest"
       - key: APP_USER_AGENT
-        value: "TravelPlannerPersonal/1.2.32 (personal-use)"
+        value: "TravelPlannerPersonal/1.2.33 (personal-use)"
       - key: NOMINATIM_URL
         value: "https://nominatim.openstreetmap.org"
       - key: OSRM_URL
