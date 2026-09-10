@@ -2420,6 +2420,24 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.38 — El itinerario no tapa la leyenda; leyenda horizontal por columnas
+
+- **Motivo.** El rail derecho reservaba `padding-bottom: 210px` fijo para la
+  leyenda, pero la leyenda vertical medía ~255 px → el itinerario la solapaba.
+- **Cambios (UI de escritorio).**
+  - `MapCanvas.svelte`: la leyenda pasa a **horizontal**: cada sección («Coste de
+    desvío», «Opciones en destino», «Estado») es una columna (`.legend__col`),
+    `legend__body` con `display:flex; flex-wrap:wrap`. Ancho `max-content`
+    (tope `min(560px, 66vw)`), alto ~100 px en vez de ~255.
+  - `App.svelte`: nuevo `legendClear` — un `$effect` mide en vivo la leyenda
+    (`getBoundingClientRect`) y calcula la distancia exacta desde el borde
+    inferior de `.app` hasta ella; `ResizeObserver` sobre `.legend` + deps
+    `planLoaded/narrow/winH/$chosen`. `.rail--right .rail__scroll` usa
+    `padding-bottom: var(--legend-clear, 210px)`, así el itinerario se expande
+    justo hasta ~10 px por encima de la leyenda y hace scroll interno si no cabe.
+    En móvil `legendClear = 0` (la leyenda no se muestra).
+- **Validación.** `npm test` 60/60; `node --check`; `npm run build` limpio.
+
 ## v1.2.37 — Sin opciones repetidas; el destino orientativo siempre es un final de etapa
 
 - **1) Nada de entradas repetidas en las listas.** `scoring.js:dedupePool(list)`

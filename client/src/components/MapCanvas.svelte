@@ -154,23 +154,29 @@
   <aside class="legend" aria-label="Leyenda del mapa">
     <p class="legend__title">Leyenda</p>
     <div class="legend__body">
-      <p class="legend__t">Coste de desvío de una parada</p>
-      <ul>
-        <li><i class="sw sw--good"></i>hasta +12 min</li>
-        <li><i class="sw sw--mid"></i>+12 a +30 min</li>
-        <li><i class="sw sw--high"></i>más de +30 min</li>
-      </ul>
-      <p class="legend__t">Opciones en destino</p>
-      <ul>
-        <li><i class="sw sw--act"></i>actividad</li>
-        <li><i class="sw sw--food"></i>comida</li>
-        <li><i class="sw sw--lodging"></i>alojamiento</li>
-      </ul>
-      <p class="legend__t">Estado</p>
-      <ul>
-        <li><i class="sw sw--sel">✓</i>seleccionada</li>
-        <li><i class="sw sw--custom">★</i>personalizada</li>
-      </ul>
+      <div class="legend__col">
+        <p class="legend__t">Coste de desvío</p>
+        <ul>
+          <li><i class="sw sw--good"></i>hasta +12 min</li>
+          <li><i class="sw sw--mid"></i>+12 a +30 min</li>
+          <li><i class="sw sw--high"></i>más de +30 min</li>
+        </ul>
+      </div>
+      <div class="legend__col">
+        <p class="legend__t">Opciones en destino</p>
+        <ul>
+          <li><i class="sw sw--act"></i>actividad</li>
+          <li><i class="sw sw--food"></i>comida</li>
+          <li><i class="sw sw--lodging"></i>alojamiento</li>
+        </ul>
+      </div>
+      <div class="legend__col">
+        <p class="legend__t">Estado</p>
+        <ul>
+          <li><i class="sw sw--sel">✓</i>seleccionada</li>
+          <li><i class="sw sw--custom">★</i>personalizada</li>
+        </ul>
+      </div>
     </div>
   </aside>
 {/if}
@@ -192,7 +198,8 @@
     right: var(--sp-3);
     bottom: var(--sp-3);
     z-index: var(--z-overlay);
-    width: 210px;
+    width: max-content;
+    max-width: min(560px, 66vw);
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
     border-radius: var(--r-md);
@@ -202,24 +209,38 @@
     pointer-events: auto;
   }
   .legend__title {
-    padding: 7px 12px 0;
+    padding: 6px 14px 0;
     font-weight: 800;
     color: var(--text-soft);
   }
+  /* Horizontal: cada sección es una columna, así la leyenda es ancha y baja
+     (deja más alto libre para el itinerario). */
   .legend__body {
-    padding: 4px 12px 10px;
+    padding: 4px 14px 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    align-items: flex-start;
+  }
+  .legend__col {
+    display: grid;
+    gap: 3px;
   }
   .legend__t {
-    margin: 6px 0 3px;
+    margin: 4px 0 2px;
     color: var(--text-faint);
     font-weight: 700;
+    white-space: nowrap;
   }
   .legend ul {
     list-style: none;
-    margin: 0 0 4px;
+    margin: 0;
     padding: 0;
     display: grid;
     gap: 3px;
+  }
+  .legend li {
+    white-space: nowrap;
   }
   .legend li {
     display: flex;

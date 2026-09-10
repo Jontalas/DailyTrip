@@ -92,6 +92,33 @@
   let narrow = $state(false);
   let winH = $state(800);
   let editingSearch = $state(false); // reabrir búsqueda con el plan ya cargado
+  // Alto reservado abajo a la derecha para que el itinerario NO tape la leyenda:
+  // se mide la leyenda real y el rail derecho se expande justo hasta ella.
+  let legendClear = $state(210);
+
+  $effect(() => {
+    // Deps: re-medir cuando aparece/desaparece la leyenda o cambia el viewport.
+    planLoaded; narrow; winH; $chosen;
+    if (narrow) { legendClear = 0; return; }
+    const measure = () => {
+      const lg = document.querySelector(".legend");
+      const app = lg?.closest(".app");
+      const rail = app?.querySelector(".rail--right");
+      if (!lg || !app || !rail) { legendClear = 0; return; }
+      const a = app.getBoundingClientRect(), r = lg.getBoundingClientRect();
+      const railPad = parseFloat(getComputedStyle(rail).paddingTop) || 20;
+      // El itinerario acaba ~10 px por encima del borde superior de la leyenda.
+      const want = Math.round(a.bottom - r.top) - railPad + 10;
+      legendClear = Math.min(Math.round(winH * 0.55), Math.max(0, want));
+    };
+    measure();
+    requestAnimationFrame(measure);
+    const lg = document.querySelector(".legend");
+    if (!lg || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(lg);
+    return () => ro.disconnect();
+  });
 
   /* ---- Hoja enfocada de móvil ---------------------------------------- */
   // La hoja de opciones (paradas/comida/cena/dormir/planes) NO tapa el mapa:
@@ -773,7 +800,7 @@
   <header class="brand">
     <div class="brand__mark">
       <span class="dot"></span>
-      Travel Planner <small>v1.2.37</small>
+      Travel Planner <small>v1.2.38</small>
     </div>
     {#if !narrow && hasPlan}
       <button
@@ -871,7 +898,7 @@
     </aside>
 
     {#if $chosen}
-      <aside class="rail rail--right" in:fly={{ x: 20, duration: dur(260) }}>
+      <aside class="rail rail--right" style="--legend-clear: {legendClear}px" in:fly={{ x: 20, duration: dur(260) }}>
         <div class="rail__scroll">
           {@render itinContent()}
         </div>
@@ -1006,9 +1033,10 @@
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    /* reservar la esquina inferior derecha para la leyenda: el itinerario
-       llega como mucho hasta aquí y hace scroll interno si no cabe */
-    padding-bottom: 210px;
+    /* Reservar la esquina inferior derecha para la leyenda: el itinerario se
+       expande justo hasta antes de ella (alto medido en vivo) y hace scroll
+       interno si no cabe. Fallback 210px antes de la primera medición. */
+    padding-bottom: var(--legend-clear, 210px);
   }
   .rail--right .card--fill {
     flex: 0 1 auto;
