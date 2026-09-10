@@ -69,13 +69,18 @@ export const api = {
   async metricsRouteOptions({ route, items }) {
     const merged = new Map(items.map(x => [x.id, x]));
     let degraded = false;
-    for (let i = 0; i < items.length; i += 20) {
+    // Lotes de 20, hasta 4 en paralelo (antes secuenciales: con ~150 paradas
+    // eran ~8 llamadas OSRM en fila). OSRM tolera esta concurrencia moderada.
+    const batches = [];
+    for (let i = 0; i < items.length; i += 20) batches.push(items.slice(i, i + 20));
+    const runBatch = async (batch) => {
       try {
-        const result = await post("/api/metrics/route-options", { route, items: items.slice(i, i + 20) });
-        if (result.source !== "osrm" || result.items?.length !== Math.min(20, items.length-i)) degraded = true;
+        const result = await post("/api/metrics/route-options", { route, items: batch });
+        if (result.source !== "osrm" || result.items?.length !== batch.length) degraded = true;
         for (const item of result.items || []) if (merged.has(item.id)) merged.set(item.id, { ...merged.get(item.id), ...item });
       } catch { degraded = true; }
-    }
+    };
+    for (let i = 0; i < batches.length; i += 4) await Promise.all(batches.slice(i, i + 4).map(runBatch));
     return { items: items.map(x => merged.get(x.id)), degraded };
   },
 

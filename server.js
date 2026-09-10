@@ -36,7 +36,7 @@ const OVERPASS_ENDPOINTS=[
 
 const GEOAPIFY_KEY=(process.env.GEOAPIFY_API_KEY||"").trim();
 const GOOGLE_KEY=(process.env.GOOGLE_PLACES_API_KEY||"").trim();
-const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.31 (personal-use)";
+const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.32 (personal-use)";
 const DEBUG_EXTERNAL=process.env.DEBUG_EXTERNAL==="1";
 const debug=(...a)=>{if(DEBUG_EXTERNAL)console.warn(...a);};
 
@@ -590,30 +590,58 @@ async function enrichGeoapifyDetails(items,maxItems=12){
    corta de Wikidata y vistas de página de 20 días (señal de popularidad).
    Es aditivo: si Wikipedia falla, se sigue con Geoapify/Google/Overpass. */
 const WIKI_API="https://es.wikipedia.org/w/api.php";
-let wikiQueue=Promise.resolve();
 const wikiResponses=new Map();
 let wikiCooldownUntil=0;
+// Pool de concurrencia limitada para Wikipedia. Antes se serializaba TODO con
+// 350 ms de hueco entre cada petición: una búsqueda de ruta con ~70 consultas
+// tardaba ~45 s sólo en huecos. Ahora 4 en paralelo con 120 ms entre lanzamientos
+// (~15-25 req/s pico, dentro de lo que tolera un User-Agent legítimo). El
+// backoff por 429 (cooldown de 60 s) sigue igual.
+const WIKI_CONCURRENCY=3, WIKI_MIN_GAP=150;
+let wikiActive=0, wikiLastStart=0;
+const wikiWaiters=[];
+function wikiSlot(){
+  return new Promise((resolve)=>{
+    const tryRun=()=>{
+      if(wikiActive<WIKI_CONCURRENCY){
+        wikiActive++;
+        const wait=Math.max(0,wikiLastStart+WIKI_MIN_GAP-Date.now());
+        wikiLastStart=Date.now()+wait;
+        setTimeout(resolve,wait);
+      }else wikiWaiters.push(tryRun);
+    };
+    tryRun();
+  });
+}
+function wikiRelease(){
+  wikiActive--;
+  wikiWaiters.shift()?.();
+}
 function wikiJson(url,options={},timeout=10000){
   const key=String(url),cached=wikiResponses.get(key);
   if(cached && Date.now()-cached.at<10*60*1000)return cached.promise;
-  const task=wikiQueue.then(async()=>{
+  const task=(async()=>{
     if(Date.now()<wikiCooldownUntil)throw Error('Wikipedia está limitando temporalmente las consultas');
-    let last;
-    for(let attempt=0;attempt<3;attempt++){
-      try {
-        const data=await fetchJson(url,{...options,headers:{...options.headers,'User-Agent':USER_AGENT,'Accept':'application/json'}},timeout);
-        if(data.error)throw Error(`wiki ${data.error.code || 'error'}`);
-        return data;
-      }catch(e){
-        last=e;
-        if(e.message==='HTTP 429'){wikiCooldownUntil=Date.now()+60000;throw e;}
-        if(attempt<2)await sleep(1000*(attempt+1));
+    await wikiSlot();
+    try{
+      if(Date.now()<wikiCooldownUntil)throw Error('Wikipedia está limitando temporalmente las consultas');
+      let last;
+      for(let attempt=0;attempt<3;attempt++){
+        try {
+          const data=await fetchJson(url,{...options,headers:{...options.headers,'User-Agent':USER_AGENT,'Accept':'application/json'}},timeout);
+          if(data.error)throw Error(`wiki ${data.error.code || 'error'}`);
+          return data;
+        }catch(e){
+          last=e;
+          if(e.message==='HTTP 429'){wikiCooldownUntil=Date.now()+60000;throw e;}
+          if(attempt<2)await sleep(400*(attempt+1));
+        }
       }
-    }
-    throw last;
-  });
+      throw last;
+    }finally{ wikiRelease(); }
+  })();
   wikiResponses.set(key,{at:Date.now(),promise:task});
-  wikiQueue=task.catch(()=>{wikiResponses.delete(key);}).then(()=>sleep(350));
+  task.catch(()=>{wikiResponses.delete(key);});
   return task;
 }
 const WIKI_SKIP=/\(desambiguaci[oó]n\)|^Lista de |^Anexo:|^Categor[ií]a:|^Wikiproyecto|^(archidi[oó]cesis|di[oó]cesis|provincia|comarca|partido judicial|mancomunidad|jurisdicci[oó]n|taifa|reino|condado|se[ñn]or[ií]o|marquesado|ducado|batalla|asedio|sitio|bombardeo|conquista|toma|rebeli[oó]n|sublevaci[oó]n|elecciones|club|uni[oó]n deportiva|c\.? ?d\.?|c\.? ?f\.?)\s+(de|del|d[eé])\s+/i;
@@ -1296,7 +1324,9 @@ async function corridorLandmarks(index){
   // devuelve lo que haya (los hitos son un extra, no deben colgar la búsqueda).
   const wq=async params=>{
     const wait=wikiCooldownUntil-Date.now();
-    if(wait>0){ if(wait>40000) return null; await sleep(wait+300); }
+    // Los hitos son un extra: si Wikipedia está en cooldown más de ~8 s, no se
+    // espera (no se cuelga la búsqueda por un plus).
+    if(wait>0){ if(wait>8000) return null; await sleep(wait+300); }
     try{ return await wikiFetch(params); }catch{ return null; }
   };
   const step=Math.max(12,index.total/16);
@@ -1438,11 +1468,12 @@ async function discoverRouteStops(route,destination,index,target,key){
       return {items,saturated:items.rawCount>=20};
     })
   });
-  // Hitos del corredor PRIMERO (prioridad en la cola de Wikipedia), luego la
-  // búsqueda general de POI. Ambos pasan por `prepare` (mismo filtro de
-  // corredor/márgenes y deduplicación) antes de puntuarse juntos.
-  const corridorHits=await corridorLandmarks(index).catch(()=>[]);
-  const found=await searchRoutePlaces({centers:index.centers,providers,target,prepare,pause:()=>sleep(200)});
+  // Hitos del corredor y búsqueda general EN PARALELO (el pool de concurrencia de
+  // `wikiJson` ya evita el 429). Ambos pasan por `prepare` antes de puntuarse.
+  const [corridorHits,found]=await Promise.all([
+    corridorLandmarks(index).catch(()=>[]),
+    searchRoutePlaces({centers:index.centers,providers,target,prepare,pause:()=>sleep(120)})
+  ]);
   const ranked=enrichInterest(prepare([...corridorHits,...found.candidates]),destination.name);
   // Se devuelven MUCHAS más candidatas que el objetivo mínimo (`target`): el
   // cliente reordena por "qué te apetece hoy" y así puede sacar a flote paradas
@@ -1858,4 +1889,4 @@ app.post("/api/plan/route-via",async(req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Travel Planner 1.2.31 en http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`Travel Planner 1.2.32 en http://localhost:${PORT}`));

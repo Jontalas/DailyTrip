@@ -2411,6 +2411,34 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.32 — Búsqueda de paradas en ruta mucho más rápida
+
+- **Motivo.** `/api/options/route` tardaba ~40 s (vs ~5-10 s las actividades de
+  destino) porque recorre TODO el corredor (~22 centros × 2 proveedores +
+  `corridorLandmarks`) y cada consulta a Wikipedia pasaba por una **cola global
+  serializada con 350 ms de hueco**: ~70 consultas ⇒ ~45 s sólo en huecos.
+- **Cambios.**
+  - `wikiJson` (`server.js`): la cola serializada se sustituye por un **pool de
+    concurrencia** — `WIKI_CONCURRENCY=3`, `WIKI_MIN_GAP=150` ms entre
+    lanzamientos (~15-20 req/s pico, dentro de lo que tolera un User-Agent
+    legítimo). Se conserva el backoff por 429 (cooldown 60 s) y la caché de 10
+    min de respuestas. Reintentos con espera 0,4/0,8 s (antes 0,8/1,6). Se
+    elimina `wikiQueue`.
+  - `discoverRouteStops`: `corridorLandmarks` y `searchRoutePlaces` corren **en
+    paralelo** (`Promise.all`), no en serie. `corridorLandmarks` deja de esperar
+    hasta 40 s un cooldown de Wikipedia: si supera ~8 s, se salta (los hitos son
+    un extra).
+  - `searchRoutePlaces` (`lib/route-search.js`): la pasada rápida agrupa de 4 en
+    4 (antes de 2 en 2); `pause` de 120 ms.
+  - `api.metricsRouteOptions` (`client/src/lib/api.js`): los lotes de métricas
+    OSRM se lanzan **4 en paralelo** en vez de en serie (con ~150 paradas eran
+    ~8 llamadas en fila).
+- **Impacto medido (rutas frescas, sin caché).** Bilbao→Vitoria 79 km: 5,0 s ·
+  Zaragoza→Huesca 85 km: 4,4 s · Barcelona→Girona 111 km: 6,9 s ·
+  Sevilla→Córdoba 165 km: 7,5 s. Antes ~40 s. La cola larga sigue siendo un 429
+  puntual de Wikipedia (la vía definitiva sería la capa de IA, ver §46.8).
+- **Validación.** `npm test` 47/47; `node --check`; `npm run build`.
+
 ## v1.2.31 — El formulario de búsqueda no colapsa hasta conocer los finales de etapa
 
 - **Motivo.** En v1.2.30 el formulario se colapsaba a la barra de resumen en
@@ -5071,3 +5099,35 @@ transiciones `fly`; con `prefers-reduced-motion` devuelven 0. La regla global de
   plan cargado): descarga `dailytrip-<origen>-<destino>-<fecha>.json`.
 - **Cargar viaje**: botón en la tarjeta de búsqueda (y en la hoja «search` de
   móvil) → `<input type=file>` oculto → `applyTrip()` valida `v` y vuelca todo.
+
+## 46.8. Capa de IA para curación de sitios (propuesta, no implementada)
+
+Evaluado a raíz de la lentitud del barrido de Wikipedia y de la dificultad para
+que hitos como la Cueva de Nerja aparezcan siempre. **Es factible y encaja bien.**
+
+- **Modelo/API.** Google Gemini Flash (ya usado en OVFutbol7: `@google/genai`,
+  clave). Latencia ~1-3 s, plan gratuito holgado. La llamada debe ser
+  **server-side** (`GEMINI_API_KEY` como los demás secretos), no en el navegador.
+- **Rol: curación/sugerencia, NO fuente de datos.** El LLM propone NOMBRES de
+  lugares interesantes del corredor / del destino (+ una frase de por qué + una
+  nota 0-100 de «merece un desvío»). Cada nombre se **geocodifica con Nominatim**
+  (ya en uso, gratis) para obtener coordenadas reales y confirmar que existe; el
+  que no geocodifica o cae fuera del corredor ±10 km se descarta. Entra al pool
+  de candidatos como un proveedor más (`source:"ai"`), y pasa por el mismo
+  `prepare`/`enrichInterest`/`selectRoutePlaces`.
+- **Guardarraíl (principio §2.4).** Nunca se confían coordenadas ni horarios del
+  LLM. Su salida sólo decide «qué nombres merece la pena mostrar»; el resto del
+  pipeline valida.
+- **Beneficios.** (1) Velocidad: 1 llamada + geocodificación en paralelo (~5 s)
+  puede sustituir el barrido multi-proveedor de Wikipedia (~10-40 s). (2)
+  Fiabilidad: un LLM conoce los hitos de cualquier ruta de España; adiós a las
+  peleas con el rate-limit de Wikipedia. (3) Descripciones para lugares sin
+  artículo de Wikipedia.
+- **Riesgos.** Alucinación (mitigada por la geocodificación obligatoria); nombres
+  ambiguos (geocodificar con la región como contexto + filtro de corredor);
+  no-determinismo (`temperature` baja + caché por corredor); dependencia de un
+  servicio de Google.
+- **Plan sugerido.** Empezar como proveedor **aditivo** (IA + Wikipedia/Geoapify/
+  OSM, todo validado por geocodificación), medir calidad, y luego valorar hacerlo
+  primario y adelgazar el barrido de Wikipedia. Requiere decisión de producto y
+  la clave de API antes de construirlo.
