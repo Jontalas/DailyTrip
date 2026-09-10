@@ -99,3 +99,45 @@ test('datos reales, vacío real, respaldo y error se distinguen; reintento conse
   const recovered=await loadCategory(async()=>({status:'ok',items:[point('Nueva')]}),items);
   assert.equal(recovered.status,'ok');assert.equal(recovered.items[0].id,'Nueva');
 });
+test('trip-state: snapshot/restore conserva el estado y comprime las coordenadas',async()=>{
+  const {get}=await import('svelte/store');
+  const st=await import('../client/src/lib/stores.js');
+  const {buildSnapshot,applySnapshot,isSnapshot,snapshotFilename}=await import('../client/src/lib/trip-state.js');
+  const coords=Array.from({length:200},(_,i)=>({lat:36+i*0.001,lon:-4-i*0.002}));
+  st.searchContext.set({origin:{name:'Málaga',lat:36,lon:-4},target:{name:'Almería',lat:36.8,lon:-2.4},toleranceKm:40,referenceRoute:{coords}});
+  st.chosen.set({name:'Adra',lat:36.75,lon:-3,roadKm:200});
+  st.routeData.set({roadKm:216,durationMin:180,coords,source:'osrm'});
+  st.pools.set({...st.emptyPools(),route:[point('R1'),point('R2')]});
+  st.selected.set({...st.emptySelected(),route:[point('R1')],lunch:point('Com')});
+  st.customStops.set([{...point('Mío'),custom:true}]);
+  st.customDurations.set(new Map([['R1',75]]));
+  st.preferences.set(new Set(['history','views']));
+  st.departureTime.set('08:15');
+
+  const snap=buildSnapshot({planLoaded:true,originText:'Málaga'});
+  assert.equal(isSnapshot(snap),true);
+  assert.equal(snap.searchContext.referenceRoute,undefined,'no guarda referenceRoute');
+  assert.ok(Array.isArray(snap.routeData.coords)&&typeof snap.routeData.coords[0]==='number','coords empaquetadas planas');
+  assert.equal(snap.routeData.coords.length,400,'200 puntos -> 400 números');
+  // La ruta empaquetada pesa mucho menos que un array de {lat,lon}
+  assert.ok(JSON.stringify(snap.routeData.coords).length < JSON.stringify(coords).length*0.6);
+  const json=JSON.stringify(snap);
+
+  // Reset + restore desde el JSON serializado
+  st.searchContext.set(null);st.chosen.set(null);st.routeData.set(null);
+  st.pools.set(st.emptyPools());st.selected.set(st.emptySelected());st.customStops.set([]);
+  st.customDurations.set(new Map());st.preferences.set(new Set());st.departureTime.set('09:30');
+  applySnapshot(JSON.parse(json));
+
+  assert.equal(get(st.chosen).name,'Adra');
+  assert.equal(get(st.routeData).coords.length,200);
+  assert.deepEqual(get(st.routeData).coords[0],{lat:36,lon:-4});
+  assert.equal(get(st.routeData).roadKm,216);
+  assert.equal(get(st.selected).route[0].id,'R1');
+  assert.equal(get(st.selected).lunch.id,'Com');
+  assert.equal(get(st.customStops)[0].custom,true);
+  assert.equal(get(st.customDurations).get('R1'),75);
+  assert.deepEqual([...get(st.preferences)].sort(),['history','views']);
+  assert.equal(get(st.departureTime),'08:15');
+  assert.match(snapshotFilename(snap),/^dailytrip-malaga-adra-\d{4}-\d\d-\d\d\.json$/);
+});

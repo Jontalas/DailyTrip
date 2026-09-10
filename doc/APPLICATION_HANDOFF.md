@@ -2399,6 +2399,39 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.29 — Guardar y cargar el viaje completo
+
+- **Motivo.** Poder salvar el estado de trabajo (ruta, opciones, selecciones,
+  itinerario…) y volver a cargarlo, de la forma más eficiente posible.
+- **Cambios.**
+  - Nuevo `client/src/lib/trip-state.js`: `buildSnapshot`/`applySnapshot`/
+    `isSnapshot`/`snapshotFilename`, `TRIP_VERSION=1`. Serializa **sólo lo no
+    recomputable**; el itinerario/ruta del día/`legCache`/`activeRoute` se
+    reconstruyen solos al cargar (una llamada a `/api/plan/day`, casi siempre en
+    caché). Coordenadas de ruta empaquetadas como array plano `[lat,lon,…]`
+    (~45 % menos); no se guarda `searchContext.referenceRoute`.
+  - `App.svelte`: **autoguardado** en `localStorage["dailytrip:trip"]` (retardo
+    1,5 s, sólo con base elegida); barra **«Continuar / Empezar de cero»** al
+    montar si hay instantánea; botón **«Cargar viaje»** (tarjeta de búsqueda y
+    hoja móvil) con `<input type=file>` oculto.
+  - `ItineraryPanel.svelte`: prop `onsave` → botón **«Guardar viaje»** que
+    descarga `dailytrip-<origen>-<destino>-<fecha>.json`.
+  - **Bugfix (regresión de v1.2.26):** `chooseBase` seguía asignando
+    `sheetOpen`/`sheetTab`, variables eliminadas en el rediseño móvil →
+    `ReferenceError` que abortaba la función a mitad (la ruta detallada
+    origen→base no se dibujaba hasta cargar opciones). Eliminadas esas dos líneas.
+  - Versión 1.2.29 en los 6 sitios habituales.
+- **Nuevos invariantes.**
+  - Un refresco o cierre del navegador no pierde el trabajo (autoguardado).
+  - La instantánea contiene todo lo necesario para restaurar el estado sin
+    re-buscar opciones ni re-geocodificar; sólo se recalcula el itinerario.
+- **Compatibilidad.** `TRIP_VERSION` en la instantánea; un archivo de versión
+  distinta se rechaza con aviso. `localStorage` keys: `dailytrip:trip` (nueva),
+  `tp-theme` (sin cambios).
+- **Validación.** `npm test` 47/47 (nueva: round-trip snapshot/restore + tamaño
+  del empaquetado); `node --check server.js`; `npm run build`; captura desktop y
+  móvil con el botón «Cargar viaje` y sin errores de consola.
+
 ## v1.2.28 — Hitos de alto interés en las paradas en ruta
 
 - **Motivo.** En Málaga→Almería no se ofrecía la Cueva de Nerja. El corredor da
@@ -4941,3 +4974,31 @@ a una sola tarea**, invocada desde una **barra flotante inferior**
 `client/src/lib/motion.js` (`dur(ms)`, `reducedMotion()`) envuelve las
 transiciones `fly`; con `prefers-reduced-motion` devuelven 0. La regla global de
 `app.css` ya anula `animation`/`transition` CSS.
+
+## 46.7. Guardar / cargar el viaje (desde v1.2.29)
+
+`client/src/lib/trip-state.js`:
+
+- `buildSnapshot(extra)` — objeto serializable con **sólo lo no recomputable**:
+  `searchContext` (sin `referenceRoute`), `baseResults`, `chosen`, `routeData`,
+  `pools`, `selected`, `customStops`, `customDurations` (como pares), `preferences`
+  (como array), `departureTime`. `extra` mezcla estado local de App
+  (`planLoaded`, `originText`). Campo `v` = `TRIP_VERSION`.
+- Las **coordenadas de ruta** van como array plano `[lat,lon,lat,lon,…]`
+  (`packCoords`/`unpackCoords`): ~45 % menos que un array de `{lat,lon}`. Es el
+  único bulto real (una ruta de 200 km ≈ 3600 puntos).
+- `applySnapshot(s)` — vuelca a los stores. Lo derivado (itinerario, ruta del
+  día, `legCache`, `activeRoute`) lo reconstruyen los `$effect` de `App.svelte`;
+  la única red al cargar es `/api/plan/day` (normalmente en caché).
+
+`App.svelte`:
+
+- **Autoguardado**: un `$effect` con retardo de 1,5 s escribe la instantánea en
+  `localStorage["dailytrip:trip"]` mientras hay base elegida. Un refresco o
+  cierre no pierde nada.
+- Al montar, si hay instantánea válida se ofrece una barra **«Continuar / Empezar
+  de cero»** (`resumeSnap`); no se restaura sola.
+- **Guardar viaje** (`ItineraryPanel`, junto a «Descargar itinerario`, sólo con
+  plan cargado): descarga `dailytrip-<origen>-<destino>-<fecha>.json`.
+- **Cargar viaje**: botón en la tarjeta de búsqueda (y en la hoja «search` de
+  móvil) → `<input type=file>` oculto → `applyTrip()` valida `v` y vuelca todo.

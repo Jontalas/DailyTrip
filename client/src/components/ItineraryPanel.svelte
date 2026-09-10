@@ -5,7 +5,7 @@
   import { fromMin } from "../lib/format.js";
   import { dur } from "../lib/motion.js";
 
-  let { result = { events: [], endTime: 0, warnings: [] }, hasPlan = false, onretry } = $props();
+  let { result = { events: [], endTime: 0, warnings: [] }, hasPlan = false, onretry, onsave } = $props();
 
   function downloadPlan() {
     const lines=['Itinerario del día',...result.events.map(e=>`${fromMin(e.time)} · ${e.label}: ${e.name}${e.phase==='travel' ? ` (${e.durationMin} min${e.journeyDurationMin!=null?`; ${e.journeyDurationMin} min de conducción en total, pausa aparte`:''})` : e.mins ? ` (${e.mins} min)` : ''}`),'',...(result.warnings || [])];
@@ -40,6 +40,7 @@
         <div class="route-actions">
           {#if !result.routingBusy && (result.routingError || result.routingEstimated)}<button type="button" onclick={onretry}>Reintentar ruta</button>{/if}
           <button type="button" onclick={downloadPlan}>Descargar itinerario</button>
+          {#if onsave}<button type="button" onclick={onsave}>Guardar viaje</button>{/if}
         </div>
       </div>
     {/if}

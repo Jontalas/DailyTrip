@@ -19,6 +19,7 @@
   import { toMin, fromMin } from "./lib/format.js";
   import { dur } from "./lib/motion.js";
   import { approximateSchedule, isLunchViable, buildItinerary, legKey, DAY_END } from "./lib/itinerary.js";
+  import { buildSnapshot, applySnapshot, isSnapshot, snapshotFilename } from "./lib/trip-state.js";
   import {
     providers,
     searchContext,
@@ -50,6 +51,11 @@
       if (saved) theme.set(saved);
     } catch {}
     api.providers().then((p) => providers.set(p)).catch(() => {});
+
+    try {
+      const raw = localStorage.getItem("dailytrip:trip");
+      if (raw) { const s = JSON.parse(raw); if (isSnapshot(s) && s.chosen) resumeSnap = s; }
+    } catch {}
 
     const mq = window.matchMedia("(max-width: 1024px)");
     const apply = () => (narrow = mq.matches);
@@ -128,6 +134,69 @@
   });
   let mapFocus = $state(false); // adelgazar ambos rails
   let itin = $state({ events: [], endTime: 0, warnings: [] });
+
+  /* ---- Guardar / cargar el viaje ------------------------------------ */
+  let tripMsg = $state("");
+  let resumeSnap = $state(null); // instantánea de localStorage pendiente de retomar
+  let fileInput;                 // <input type=file> oculto
+  let autosaveTimer;
+
+  function saveTrip() {
+    const snap = buildSnapshot({ planLoaded, originText });
+    const url = URL.createObjectURL(new Blob([JSON.stringify(snap)], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = snapshotFilename(snap);
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function applyTrip(snap) {
+    planSeq++; daySeq++; routeSeq++;
+    catalogRoute = null;
+    legCache = new Map();
+    categoryState = ["route", "routeLunch", "activities", "food", "lodging"]
+      .reduce((m, k) => ((m[k] = { status: "ok" }), m), {});
+    applySnapshot(snap);
+    catalogRoute = $routeData; // evita un refresco de corredor innecesario
+    originText = snap.originText || snap.searchContext?.origin?.name || "";
+    editingSearch = false;
+    planLoaded = !!snap.planLoaded && !!snap.chosen;
+    planning.set({ busy: false, steps: [], status: "" });
+    if (narrow) mobileTask.set(null);
+    resumeSnap = null;
+    tripMsg = "";
+  }
+
+  async function loadTripFile(e) {
+    const file = e.currentTarget.files?.[0];
+    e.currentTarget.value = "";
+    if (!file) return;
+    try {
+      const snap = JSON.parse(await file.text());
+      if (!isSnapshot(snap)) { tripMsg = "Ese archivo no es un viaje de DailyTrip compatible."; return; }
+      applyTrip(snap);
+    } catch {
+      tripMsg = "No se pudo leer el archivo.";
+    }
+  }
+
+  function forgetSavedTrip() {
+    try { localStorage.removeItem("dailytrip:trip"); } catch {}
+    resumeSnap = null;
+  }
+
+  // Autoguardado en localStorage (con retardo): un refresco o un cierre nunca
+  // pierde el trabajo. Sólo mientras haya una base elegida.
+  $effect(() => {
+    $searchContext; $chosen; $routeData; $pools; $selected; $customStops;
+    $customDurations; $preferences; $departureTime; planLoaded;
+    clearTimeout(autosaveTimer);
+    if (!untrack(() => $chosen)) return;
+    autosaveTimer = setTimeout(() => {
+      try { localStorage.setItem("dailytrip:trip", JSON.stringify(buildSnapshot({ planLoaded, originText }))); } catch {}
+    }, 1500);
+  });
   let planSeq = 0;
   let legCache = $state(new Map());
   let dayResult = $state(null);
@@ -232,8 +301,6 @@
     planLoaded = false;
     editingSearch = false;
     itin = { events: [], endTime: 0, warnings: [] };
-    sheetOpen = true;
-    sheetTab = "plan";
 
     // Dibujar YA la ruta origen -> base en el mapa (no se espera a "Cargar
     // opciones"). Las capas que dependen del plan (paradas, marcadores, línea del
@@ -513,10 +580,14 @@
     <section class="card">
       <div class="card-head">
         <h2>Buscar final de etapa</h2>
-        {#if $chosen}
-          <button class="link-btn" type="button" onclick={() => (editingSearch = false)}>volver</button>
-        {/if}
+        <div class="card-head__actions">
+          <button class="link-btn" type="button" onclick={() => fileInput?.click()}>Cargar viaje</button>
+          {#if $chosen}
+            <button class="link-btn" type="button" onclick={() => (editingSearch = false)}>volver</button>
+          {/if}
+        </div>
       </div>
+      {#if tripMsg}<p class="status status--error">{tripMsg}</p>{/if}
       <SearchPanel onsearch={runSearch} />
     </section>
 
@@ -537,12 +608,14 @@
 
 {#snippet itinContent()}
   <div class="card card--fill">
-    <ItineraryPanel onretry={() => dayRetry++} result={itin} {hasPlan} />
+    <ItineraryPanel onretry={() => dayRetry++} onsave={saveTrip} result={itin} {hasPlan} />
   </div>
 {/snippet}
 
 {#snippet mobileTaskView(task)}
   {#if task === "search"}
+    <button class="m-load" type="button" onclick={() => fileInput?.click()}>📂 Cargar viaje guardado</button>
+    {#if tripMsg}<p class="status status--error">{tripMsg}</p>{/if}
     <SearchPanel onsearch={runSearch} />
     {#if results.length}
       <h3 class="m-sub">Finales de etapa</h3>
@@ -567,7 +640,7 @@
     <label class="m-time"><span>Hora de salida</span><input type="time" bind:value={$departureTime} /></label>
     <PreferencesBar />
   {:else if task === "itin"}
-    <ItineraryPanel onretry={() => dayRetry++} result={itin} {hasPlan} />
+    <ItineraryPanel onretry={() => dayRetry++} onsave={saveTrip} result={itin} {hasPlan} />
   {:else}
     <OptionsPanel
       mobile
@@ -599,7 +672,7 @@
   <header class="brand">
     <div class="brand__mark">
       <span class="dot"></span>
-      Travel Planner <small>v1.2.28</small>
+      Travel Planner <small>v1.2.29</small>
     </div>
     {#if !narrow && hasPlan}
       <button
@@ -620,6 +693,25 @@
       {themeLabel}
     </button>
   </header>
+
+  <input
+    type="file"
+    accept="application/json,.json"
+    bind:this={fileInput}
+    onchange={loadTripFile}
+    hidden
+  />
+
+  {#if resumeSnap && !$chosen}
+    <div class="resume" in:fly={{ y: -8, duration: dur(200) }}>
+      <span class="resume__t">
+        Viaje guardado:
+        <strong>{resumeSnap.searchContext?.origin?.name} → {resumeSnap.chosen?.name}</strong>
+      </span>
+      <button class="resume__go" type="button" onclick={() => applyTrip(resumeSnap)}>Continuar</button>
+      <button class="resume__x" type="button" onclick={forgetSavedTrip}>Empezar de cero</button>
+    </div>
+  {/if}
 
   {#if narrow}
     <!-- Móvil / tablet: mapa a pantalla completa + barra de tareas + hoja enfocada -->
@@ -996,6 +1088,62 @@
     align-items: baseline;
     justify-content: space-between;
     gap: var(--sp-2);
+  }
+  .card-head__actions {
+    display: flex;
+    gap: var(--sp-3);
+    flex: none;
+  }
+
+  /* ---- guardar / cargar viaje ---- */
+  .resume {
+    position: absolute;
+    top: calc(var(--sp-4) + 52px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: var(--z-overlay);
+    max-width: min(92vw, 520px);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    padding: 8px 14px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--r-pill);
+    backdrop-filter: blur(var(--glass-blur));
+    box-shadow: var(--sh-2);
+    font-size: var(--fs-12);
+    color: var(--text-soft);
+  }
+  .resume__t { flex: 1; min-width: 160px; }
+  .resume__t strong { color: var(--text); }
+  .resume__go {
+    flex: none;
+    padding: 5px 12px;
+    border-radius: var(--r-pill);
+    background: var(--accent);
+    color: var(--accent-text);
+    font-weight: 700;
+    font-size: 11px;
+  }
+  .resume__x {
+    flex: none;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-faint);
+  }
+  .resume__x:hover { color: var(--text); }
+  .m-load {
+    width: 100%;
+    margin-bottom: 12px;
+    padding: 11px;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-sm);
+    font-size: var(--fs-13);
+    font-weight: 700;
+    color: var(--text-soft);
+    background: var(--surface);
   }
   h2 {
     font-size: var(--fs-14);
