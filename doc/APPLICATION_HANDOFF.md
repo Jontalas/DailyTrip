@@ -2420,6 +2420,35 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.42 — Geocodificación de lugares personalizados mucho más fiable
+
+- **Motivo.** `geocode(q,{place:true})` cogía `d[0]` de Nominatim a ciegas: para
+  «Andarax» (bar en Calle Hermanos Pinzón, Almería) devolvía una **calle**
+  homónima a 15 km, y «Bar Andarax» un sitio en otro pueblo.
+- **Cambios.**
+  - **Nuevo `lib/geocode-rank.js`**: `pickPlaceResult(list, q, center)` puntúa los
+    resultados y prioriza POIs (`amenity/shop/tourism/leisure/historic/…`) y
+    direcciones con número frente a calles y límites; suma por nombre exacto y por
+    cercanía al `center`; resta a `highway` sin número y a `boundary/place`.
+    Devuelve `{best, bestScore, nameHit}`. `NAME_PREFIX` = genéricos
+    («Bar/Restaurante/Hotel/Museo…»).
+  - `server.js` `geocode(q,{place,near})`:
+    - `near` (`{lat,lon}` o caja `{minLat,…}`) añade un `viewbox` a Nominatim que
+      **sesga** (no restringe) la búsqueda hacia el área del viaje.
+    - `place:true` → `limit=12` + `pickPlaceResult`; si el mejor no lleva el
+      nombre buscado (`!nameHit`), **reintenta sin el prefijo genérico**
+      («Bar Andarax» → «Andarax») y se queda con el que más puntúe.
+  - `/api/geocode` acepta `near`; `api.js` lo reenvía.
+  - `OptionsPanel`: la parada personalizada geocodifica con la **caja de la ruta**;
+    comida/cena/alojamiento con el **punto del destino** (`nearPoint`, nuevo prop
+    desde `App.svelte` = coords de `$chosen`). `aiPlaceCandidates` también pasa
+    `near` a su geocodificación de respaldo.
+- **Verificado.** «Andarax», «Bar Andarax», «Restaurante Andarax», «Andarax
+  Almería», «Andarax, Calle Hermanos Pinzón, Almería» → todas resuelven al
+  restaurante correcto (36.8419, -2.4545).
+- **Validación.** `npm test` 66/66 (nuevo `scripts/geocode-rank.test.mjs`);
+  `node --check`; `npm run build` limpio.
+
 ## v1.2.41 — Filtro de texto común a todas las secciones de opciones
 
 - **Qué.** Un único campo de búsqueda arriba del acordeón de `OptionsPanel`

@@ -11,6 +11,7 @@ import { destinationScale, topInterest, latestPopulation } from "./lib/destinati
 import { placeContent } from "./lib/place-content.js";
 import { routeStopTarget, routeGeometryIndex, mergeRoutePlaces, selectRoutePlaces, searchRoutePlaces, pagedPlaces, subdividedPlaces, isRouteLandmark } from "./lib/route-search.js";
 import { aiCuratePlaces, aiConfigured, applyAiRanking, aiRank, normName } from "./lib/ai-curator.js";
+import { pickPlaceResult, NAME_PREFIX } from "./lib/geocode-rank.js";
 import { fileURLToPath } from "node:url";
 
 // Node puede usar un almacén distinto al de Windows. Añadir las CA del sistema
@@ -38,7 +39,7 @@ const OVERPASS_ENDPOINTS=[
 const GEOAPIFY_KEY=(process.env.GEOAPIFY_API_KEY||"").trim();
 const GOOGLE_KEY=(process.env.GOOGLE_PLACES_API_KEY||"").trim();
 const GEMINI_KEY=(process.env.GEMINI_API_KEY||"").trim();
-const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.41 (personal-use)";
+const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.42 (personal-use)";
 const DEBUG_EXTERNAL=process.env.DEBUG_EXTERNAL==="1";
 const debug=(...a)=>{if(DEBUG_EXTERNAL)console.warn(...a);};
 
@@ -142,23 +143,48 @@ async function nominatimWait(){
 // OJO: NO incluir "administrative" — países y estados también lo son.
 const PLACE_LIKE=new Set(["city","town","village","hamlet","municipality","suburb","borough","quarter","neighbourhood","locality","isolated_dwelling"]);
 
-async function geocode(q,{place=false}={}){
-  const key=`geo:${place?'poi:':''}${norm(q)}`;
-  if(memCache.has(key))return memCache.get(key);
-
+async function nominatimSearch(q,{limit=6,viewbox=null}={}){
   await nominatimWait();
   const u=new URL("/search",NOMINATIM);
   u.searchParams.set("q",q);
   u.searchParams.set("format","jsonv2");
-  u.searchParams.set("limit","6");
+  u.searchParams.set("limit",String(limit));
   u.searchParams.set("addressdetails","1");
-
+  if(viewbox)u.searchParams.set("viewbox",viewbox);
   const d=await fetchJson(u,{headers:{"User-Agent":USER_AGENT,"Accept-Language":"es"}},9000);
   lastNominatimAt=Date.now();
+  return Array.isArray(d)?d:[];
+}
+
+async function geocode(q,{place=false,near=null}={}){
+  // `near`: {lat,lon} o una caja {minLat,minLon,maxLat,maxLon} para sesgar la
+  // búsqueda hacia el área del viaje (no la restringe).
+  const center=near?(near.lat!=null?{lat:near.lat,lon:near.lon}:{lat:(near.minLat+near.maxLat)/2,lon:(near.minLon+near.maxLon)/2}):null;
+  const viewbox=near
+    ? (near.minLat!=null
+        ? `${near.minLon},${near.minLat},${near.maxLon},${near.maxLat}`
+        : `${near.lon-0.6},${near.lat-0.45},${near.lon+0.6},${near.lat+0.45}`)
+    : null;
+  const key=`geo:${place?'poi:':''}${norm(q)}${center?`@${center.lat.toFixed(2)},${center.lon.toFixed(2)}`:''}`;
+  if(memCache.has(key))return memCache.get(key);
+
+  let d=await nominatimSearch(q,{limit:place?12:6,viewbox});
+
+  // Reintento sin el prefijo genérico ("Bar Andarax" -> "Andarax") cuando la 1ª
+  // pasada no dio un resultado con el nombre buscado.
+  if(place){
+    const stripped=String(q).replace(NAME_PREFIX,"").trim();
+    const first=d.length?pickPlaceResult(d,q,center):null;
+    if(stripped && stripped!==String(q).trim() && (!first || !first.nameHit || first.bestScore<60)){
+      const d2=await nominatimSearch(stripped,{limit:12,viewbox});
+      const second=d2.length?pickPlaceResult(d2,stripped,center):null;
+      if(second && (second.nameHit || !first || second.bestScore>first.bestScore)){d=d2;q=stripped;}
+    }
+  }
   if(!d.length)throw new Error(`No encuentro "${q}".`);
 
-  // Preferimos el primer resultado que sea un núcleo poblado; si no hay, el 1º.
-  const x=place?d[0]:(d.find(r=>PLACE_LIKE.has(r.addresstype))||d[0]);
+  // place: mejor POI/dirección; si no, primer núcleo poblado; si no, el 1º.
+  const x=place?pickPlaceResult(d,q,center).best:(d.find(r=>PLACE_LIKE.has(r.addresstype))||d[0]);
 
   const a=x.address||{};
   const type=a.city?"city":a.town?"town":a.village?"village":"place";
@@ -1429,6 +1455,7 @@ async function robustRouteStops(route,destination){
 const AI_CATEGORY_KEYWORD={museum:"museum",historic:"historic",viewpoint:"viewpoint",nature:"natural",park:"park",beach:"beach",attraction:"attraction",restaurant:"restaurant"};
 async function aiPlaceCandidates(suggestions,{near=null,routeIndex=null,radiusKm=12,cap=14,endpoints=null}={}){
   const list=(suggestions||[]).slice(0,cap);
+  const geoNear=near||(routeIndex?routeIndex.pointAt(routeIndex.total/2):null);
   const out=[];
   for(let i=0;i<list.length;i+=4){
     const batch=await Promise.all(list.slice(i,i+4).map(async s=>{
@@ -1438,7 +1465,7 @@ async function aiPlaceCandidates(suggestions,{near=null,routeIndex=null,radiusKm
       try{coord=await wikiPlaceCoord(name,near||undefined);}catch{coord=null;}
       if(!coord){
         try{
-          const g=await geocode([name,s.locality].filter(Boolean).join(", "),{place:true});
+          const g=await geocode([name,s.locality].filter(Boolean).join(", "),{place:true,near:geoNear});
           if(g&&Number.isFinite(g.lat))coord={lat:g.lat,lon:g.lon};
         }catch{coord=null;}
       }
@@ -1781,9 +1808,10 @@ app.post("/api/plan/route",async(req,res)=>{
 // inversa por coordenadas ({lat,lon}). Reutiliza los proveedores existentes.
 app.post("/api/geocode",async(req,res)=>{
   try{
-    const {q,lat,lon,place}=req.body||{};
+    const {q,lat,lon,place,near}=req.body||{};
     if(q&&String(q).trim()){
-      const g=await geocode(String(q).trim(),{place:!!place});
+      const hint=near&&(Number.isFinite(near.lat)||Number.isFinite(near.minLat))?near:null;
+      const g=await geocode(String(q).trim(),{place:!!place,near:hint});
       return res.json({name:g.name,lat:g.lat,lon:g.lon,displayName:g.displayName,type:g.type});
     }
     if(Number.isFinite(lat)&&Number.isFinite(lon)){
@@ -2081,4 +2109,4 @@ app.post("/api/plan/route-via",async(req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Travel Planner 1.2.41 en http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`Travel Planner 1.2.42 en http://localhost:${PORT}`));

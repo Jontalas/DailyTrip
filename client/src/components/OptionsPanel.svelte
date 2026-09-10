@@ -30,8 +30,24 @@
     lateActivityIds = new Set(),
     lateLunchKeys = new Set(),
     mobile = false,
-    aiState = {}
+    aiState = {},
+    nearPoint = null
   } = $props();
+
+  // Sesgo geográfico para geocodificar lugares personalizados: la caja de la
+  // ruta si la hay (parada), o el punto del destino (comida/cena/alojamiento).
+  function routeBox() {
+    const c = ($activeRoute || $routeData)?.coords;
+    if (!c?.length) return nearPoint;
+    let minLat = 90, minLon = 180, maxLat = -90, maxLon = -180;
+    for (const p of c) {
+      if (p.lat < minLat) minLat = p.lat;
+      if (p.lat > maxLat) maxLat = p.lat;
+      if (p.lon < minLon) minLon = p.lon;
+      if (p.lon > maxLon) maxLon = p.lon;
+    }
+    return { minLat, minLon, maxLat, maxLon };
+  }
 
   let routeSel = $derived(new Set($selected.route.map((x) => x.id)));
   let actSel = $derived(new Set($selected.activities.map((x) => x.id)));
@@ -105,7 +121,7 @@
     customBusy = true;
     customError = "";
     try {
-      const g = await api.geocode({ q, place:true });
+      const g = await api.geocode({ q, place:true, near: routeBox() });
       if (!g || !Number.isFinite(g.lat)) throw new Error("No se encontró ese lugar.");
       addCustomStopEnriched(
         { id: `custom:${g.lat.toFixed(5)},${g.lon.toFixed(5)}`, name: g.name || q, lat: g.lat, lon: g.lon },
@@ -131,7 +147,7 @@
     mealBusy[kind] = true;
     mealError[kind] = "";
     try {
-      const g = await api.geocode({ q, place: true });
+      const g = await api.geocode({ q, place: true, near: nearPoint });
       if (!g || !Number.isFinite(g.lat)) throw new Error("No se encontró ese lugar.");
       setCustomMeal(kind, { name: g.name || q, lat: g.lat, lon: g.lon });
       mealQuery[kind] = "";

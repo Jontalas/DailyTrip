@@ -46,8 +46,8 @@ export const api = {
     return post("/api/plan/route", { origin, destination });
   },
 
-  geocode({ q, lat, lon, place=false }) {
-    return post("/api/geocode", { q, lat, lon, place });
+  geocode({ q, lat, lon, place=false, near=null }) {
+    return post("/api/geocode", { q, lat, lon, place, near });
   },
 
   optionsRoute({ route, destination }) {

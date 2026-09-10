@@ -747,6 +747,7 @@
           {lateLunchKeys}
           {categoryState}
           aiState={$aiCuration}
+          nearPoint={$chosen ? { lat: $chosen.lat, lon: $chosen.lon } : null}
           onretry={(key) => retryCategory(key)}
         />
       </section>
@@ -814,6 +815,7 @@
       {lateLunchKeys}
       {categoryState}
       aiState={$aiCuration}
+      nearPoint={$chosen ? { lat: $chosen.lat, lon: $chosen.lon } : null}
       onretry={(key) => retryCategory(key)}
     />
   {/if}
@@ -837,7 +839,7 @@
   <header class="brand">
     <div class="brand__mark">
       <span class="dot"></span>
-      Travel Planner <small>v1.2.41</small>
+      Travel Planner <small>v1.2.42</small>
     </div>
     {#if !narrow && hasPlan}
       <button
