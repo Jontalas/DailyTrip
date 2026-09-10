@@ -1569,17 +1569,29 @@ Museos        +12
 Miradores     +12
 ```
 
+**Aplican a TODAS las listas, ruta incluida (v1.2.30).** `applyPreferences`
+(`scoring.js`) reordena todos los pools por interés ajustado, `route` incluido.
+Antes el matching (`preferenceBonus`) usaba `category.includes("nature")` y
+similares, que fallaba justo para las categorías de ruta (`"natural"`,
+`"natural.cave"`, `"heritage"`, `"historic.castle"`…): «Naturaleza` apenas movía
+la lista de paradas en ruta. Ahora se detecta por **familia con regex**
+(`PREF_MATCH` en `scoring.js`), así que las preferencias valen igual en ruta y en
+destino.
+
+**Recálculo con toda la reserva (v1.2.30).** El servidor devuelve muchas más
+paradas de ruta que el objetivo (`selectRoutePlaces(ranked, max(90, target*3))`);
+el cliente muestra las **55 de mayor interés ajustado** (`ROUTE_CAP` en
+`OptionsPanel`) y, al activar una preferencia, reordena TODA la reserva y cambian
+cuáles se ven — puede sacar a flote una parada que estaba justo por debajo del
+corte de interés bruto. Las seleccionadas se muestran siempre. Es un límite de
+**relevancia** (ajustable con las preferencias), no un filtro de viabilidad
+(esos se quitaron en v1.2.24).
+
 ## Limitación conocida
 
-La detección depende principalmente de:
-
-```js
-item.category.includes(...)
-```
-
-Esto puede no funcionar bien cuando el proveedor devuelve categorías más genéricas o múltiples categorías.
-
-Además, la influencia visual de los selectores es poco evidente.
+El matching sigue basándose en la categoría (ahora por regex de familia), no en
+nombre/descripción/tags. La influencia visual con listas cortas sigue siendo
+sutil salvo que la preferencia cambie el corte de las 55 visibles.
 
 Mejora futura recomendada:
 
@@ -2398,6 +2410,48 @@ Al crearla:
 ---
 
 # 43. CHANGELOG DE CONTINUIDAD
+
+## v1.2.30 — Preferencias en ruta, más reserva de paradas, carga automática y barra de viaje temprana
+
+- **1. «Qué te apetece hoy» ahora afecta también a las paradas EN RUTA.**
+  `preferenceBonus` (`client/src/lib/scoring.js`) comprobaba
+  `category.includes("nature")` etc.; las categorías de ruta son `"natural"`,
+  `"heritage"`, `"historic.castle"`… → no casaban. Reescrito con `PREF_MATCH`
+  (regex por familia) + `PREF_WEIGHT`. `applyPreferences` ya reordenaba todos los
+  pools; ahora el bonus se aplica de verdad en ruta.
+- **2. Se conserva toda la reserva de paradas y se recalcula al cambiar
+  preferencia.** `server.js` `discoverRouteStops`:
+  `selectRoutePlaces(ranked, Math.max(90, target*3))` (antes `target` ≈ `roadKm/4`).
+  `OptionsPanel` muestra las **55 mejores por interés ajustado** (`ROUTE_CAP`);
+  cambiar una preferencia reordena toda la reserva y cambia cuáles se ven. Las
+  seleccionadas siempre visibles. Caché `routeStops:v25:` → **`v26:`**.
+- **3. Elegir base carga el plan automáticamente.** `chooseBase` (`App.svelte`)
+  llama a `loadPlan()` al terminar de trazar la ruta; ya no había ninguna
+  decisión que tomar en «Cargar opciones del día». Ese botón desaparece; la
+  tarjeta pasa a un estado «Preparando el día…» con el progreso (y «Reintentar`
+  si falla). En móvil, elegir base cierra la hoja y vuelve al mapa; el botón de
+  la barra pasa a «Preparando el día…».
+- **4. Barra de viaje visible ya al listar finales de etapa.** Antes sólo salía
+  tras elegir base. Ahora, con `searchContext` y sin base, muestra
+  `<origen> → Zona de <destino orientativo>` y la **distancia por carretera al
+  orientativo** (`searchContext.referenceRoute.roadKm`), con «cambiar». Al elegir
+  base pasa a `<origen> → <base>`. Derivados `tripDest`/`tripKm` en `App.svelte`;
+  aplica a la barra de escritorio y a `.m-trip`. El formulario de búsqueda se
+  colapsa tras buscar y reaparece con «cambiar` / «volver` (condición pasó de
+  `$chosen` a `$searchContext`).
+- **Archivos.** `client/src/lib/scoring.js`, `client/src/components/OptionsPanel.svelte`
+  (`ROUTE_CAP`, `allRoute`/`routeOptions`, línea de recuento), `client/src/App.svelte`
+  (`chooseBase`, `planContent`, `mobileTaskView`, `tripDest`/`tripKm`, CSS),
+  `client/src/components/MobileBar.svelte` (`hasSearch`, etiquetas), `server.js`
+  (`selectRoutePlaces`, cache key). Versión 1.2.30.
+- **Nuevos invariantes.**
+  - Las preferencias reordenan las paradas en ruta, no sólo las de destino.
+  - Elegir un final de etapa carga las opciones sin un clic extra.
+  - La barra de viaje está presente desde que hay una búsqueda; antes de elegir
+    base el destino es «Zona de <orientativo>».
+- **Validación.** `npm test` 47/47; `npm run build` sin warnings; captura
+  desktop: barra «Malaga → Zona de Almería 202 km`, formulario colapsado tras
+  buscar, plan cargado sin pulsar nada, sin errores de consola.
 
 ## v1.2.29 — Guardar y cargar el viaje completo
 

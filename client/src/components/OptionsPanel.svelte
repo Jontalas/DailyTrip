@@ -31,7 +31,21 @@
 
   let routeSel = $derived(new Set($selected.route.map((x) => x.id)));
   let actSel = $derived(new Set($selected.activities.map((x) => x.id)));
-  let routeOptions = $derived((pools.route || []).filter(x=>!x.custom));
+  // El servidor devuelve muchas más paradas de ruta de las que caben en pantalla.
+  // `pools.route` ya viene ordenado por interés AJUSTADO con "qué te apetece hoy"
+  // (applyPreferences en App). Se muestran las N mejores; al cambiar una
+  // preferencia se reordena todo y cambian cuáles se ven. Las seleccionadas se
+  // muestran siempre. No se descarta nada por horario ni viabilidad (v1.2.24).
+  const ROUTE_CAP = 55;
+  let allRoute = $derived((pools.route || []).filter((x) => !x.custom));
+  let routeOptions = $derived(
+    allRoute.length <= ROUTE_CAP
+      ? allRoute
+      : [
+          ...allRoute.slice(0, ROUTE_CAP),
+          ...allRoute.slice(ROUTE_CAP).filter((x) => routeSel.has(x.id))
+        ]
+  );
 
   function lunchIsSelected(item) {
     return $selected.lunch?.id === item.id && $selected.lunch?.lunchPhase === item.lunchPhase;
@@ -143,13 +157,16 @@
   <details class="group" data-category="route" open={$openOptionGroup === "route"}>
     <summary onclick={(e) => toggle(e, "route")}>
       <span class="g-title">Paradas en ruta</span>
-      <span class="g-count">{routeOptions.length}</span>
+      <span class="g-count">{allRoute.length}</span>
     </summary>
 
     {@render loadStatus("route")}
 
 
     <div class="list scroll-y">
+      {#if allRoute.length > ROUTE_CAP}
+        <p class="hint">{allRoute.length} paradas posibles en el recorrido · mostrando las {ROUTE_CAP} de mayor interés según «qué te apetece hoy».</p>
+      {/if}
       {#each routeOptions as item (item.id)}
         <OptionCard
           {item}
@@ -366,10 +383,12 @@
     overflow-x: hidden;
     overscroll-behavior: contain;
   }
-  .empty {
+  .empty,
+  .hint {
     font-size: 11px;
     color: var(--text-faint);
     padding: 4px 6px;
+    line-height: 1.5;
   }
   .none {
     text-align: left;

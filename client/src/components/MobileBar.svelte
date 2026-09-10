@@ -4,7 +4,7 @@
      de escritorio se reparte entre estas tareas. */
   import { selected, customStops, preferences, mobileTask, openOptionGroup } from "../lib/stores.js";
 
-  let { hasBase = false, hasPlan = false, endLabel = "" } = $props();
+  let { hasBase = false, hasPlan = false, hasSearch = false, endLabel = "" } = $props();
 
   const OPTION_TASKS = ["route", "custom", "lunch", "act", "dinner", "hotel"];
 
@@ -18,11 +18,11 @@
   // Config de botones según la fase.
   let buttons = $derived.by(() => {
     if (!hasBase)
-      return [{ task: "search", icon: "🔎", label: "Buscar etapa", badge: "", wide: true }];
+      return [{ task: "search", icon: "🔎", label: hasSearch ? "Elegir final de etapa" : "Buscar etapa", badge: "", wide: true }];
     if (!hasPlan)
       return [
         { task: "search", icon: "🗺️", label: "Etapa", badge: "" },
-        { task: "prep", icon: "▶️", label: "Preparar el día", badge: "", wide: true }
+        { task: "prep", icon: "⏳", label: "Preparando el día…", badge: "", wide: true }
       ];
     return [
       { task: "search", icon: "🗺️", label: "Etapa", badge: "" },

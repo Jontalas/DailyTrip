@@ -36,7 +36,7 @@ const OVERPASS_ENDPOINTS=[
 
 const GEOAPIFY_KEY=(process.env.GEOAPIFY_API_KEY||"").trim();
 const GOOGLE_KEY=(process.env.GOOGLE_PLACES_API_KEY||"").trim();
-const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.29 (personal-use)";
+const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.30 (personal-use)";
 const DEBUG_EXTERNAL=process.env.DEBUG_EXTERNAL==="1";
 const debug=(...a)=>{if(DEBUG_EXTERNAL)console.warn(...a);};
 
@@ -1362,7 +1362,7 @@ async function robustRouteStops(route,destination){
   const index=routeGeometryIndex(route.coords);
   const target=routeStopTarget(route.roadKm ?? index.total);
   const fingerprint=createHash("sha256").update(JSON.stringify({coords:route.coords,destination,target})).digest("hex").slice(0,24);
-  const key=`routeStops:v25:${fingerprint}`;
+  const key=`routeStops:v26:${fingerprint}`;
   const fresh=cacheGet(key);
   // Un resultado bajo el objetivo nunca evita una nueva búsqueda.
   if(fresh?.data?.coverage?.outcome==="target-reached" && fresh.data.items.length>=target)
@@ -1444,7 +1444,11 @@ async function discoverRouteStops(route,destination,index,target,key){
   const corridorHits=await corridorLandmarks(index).catch(()=>[]);
   const found=await searchRoutePlaces({centers:index.centers,providers,target,prepare,pause:()=>sleep(200)});
   const ranked=enrichInterest(prepare([...corridorHits,...found.candidates]),destination.name);
-  const primary=selectRoutePlaces(ranked,target);
+  // Se devuelven MUCHAS más candidatas que el objetivo mínimo (`target`): el
+  // cliente reordena por "qué te apetece hoy" y así puede sacar a flote paradas
+  // que quedaban justo por debajo del corte de interés bruto. La lista visible
+  // la acota el propio cliente. `coverage.target` sigue siendo el mínimo.
+  const primary=selectRoutePlaces(ranked,Math.max(90,target*3));
   // Garantía de hitos: un sitio de notabilidad indiscutible dentro del corredor
   // (p. ej. la Cueva de Nerja) se incluye SIEMPRE, aunque no entre en el
   // objetivo de ~1 parada / 4 km. Sin tope: la barra de notabilidad ya limita.
@@ -1854,4 +1858,4 @@ app.post("/api/plan/route-via",async(req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Travel Planner 1.2.29 en http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`Travel Planner 1.2.30 en http://localhost:${PORT}`));

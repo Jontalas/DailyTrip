@@ -11,18 +11,26 @@ export const PREFERENCE_DEFS = [
   { value: "views", label: "Miradores" }
 ];
 
+/* Coincidencia por familias de categoría. Las paradas EN RUTA usan categorías
+   como "natural", "natural.cave", "historic.castle", "heritage", "leisure.park"…
+   El matching con `includes("nature")` fallaba justo para "natural" (y para
+   "heritage"), así que las preferencias apenas movían la lista de ruta. Regex
+   por familia para que "qué te apetece hoy" valga igual en ruta y en destino. */
+const PREF_MATCH = {
+  history: /historic|heritage|sights|cultural|castle|church|monument|archaeolog|palac|monaster|conven|ruin|fort|muralla|alcaz/,
+  nature: /natur|park|garden|forest|beach|cala|cave|cueva|gruta|mountain|sierra|cliff|acantilad|waterfall|cascad|reserve|volcano|lago|laguna|dune/,
+  walk: /park|garden|sights|walk|paseo|promenade|viewpoint|mirador|beach|cala|natur|trail|sender|casco/,
+  gastronomy: /restaurant|cafe|\bfood\b|catering|winery|bodega|market|mercado/,
+  museums: /museum|museo|gallery|galer|pinacote/,
+  views: /viewpoint|mirador|panoram|overlook/
+};
+const PREF_WEIGHT = { history: 10, nature: 10, walk: 7, gastronomy: 10, museums: 12, views: 12 };
+
 export function preferenceBonus(item, prefs) {
   const has = (k) => (prefs instanceof Set ? prefs.has(k) : prefs.includes(k));
   const c = String(item.category || "").toLowerCase();
   let bonus = 0;
-
-  if (has("history") && (c.includes("historic") || c.includes("sights") || c.includes("cultural"))) bonus += 10;
-  if (has("nature") && (c.includes("nature") || c.includes("park") || c.includes("garden"))) bonus += 10;
-  if (has("walk") && (c.includes("park") || c.includes("sights") || c.includes("walk") || c.includes("viewpoint"))) bonus += 7;
-  if (has("gastronomy") && (c.includes("restaurant") || c.includes("cafe") || c.includes("food"))) bonus += 10;
-  if (has("museums") && c.includes("museum")) bonus += 12;
-  if (has("views") && c.includes("viewpoint")) bonus += 12;
-
+  for (const k of Object.keys(PREF_MATCH)) if (has(k) && PREF_MATCH[k].test(c)) bonus += PREF_WEIGHT[k];
   return bonus;
 }
 

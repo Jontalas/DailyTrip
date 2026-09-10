@@ -232,6 +232,17 @@
   });
   let results = $derived($baseResults.results || []);
 
+  // Barra de viaje: antes de elegir base muestra "Zona de <destino orientativo>"
+  // y la distancia por carretera hasta ese punto (searchContext.referenceRoute).
+  let tripDest = $derived(
+    $chosen ? $chosen.name
+    : $searchContext?.target?.name ? `Zona de ${$searchContext.target.name}`
+    : ""
+  );
+  let tripKm = $derived(Math.round(
+    ($chosen ? (currentDay?.roadKm ?? $chosen.roadKm) : $searchContext?.referenceRoute?.roadKm) || 0
+  ));
+
   /* ---- Búsqueda ------------------------------------------------------- */
   async function runSearch(q) {
     planSeq++;
@@ -302,9 +313,9 @@
     editingSearch = false;
     itin = { events: [], endTime: 0, warnings: [] };
 
-    // Dibujar YA la ruta origen -> base en el mapa (no se espera a "Cargar
-    // opciones"). Las capas que dependen del plan (paradas, marcadores, línea del
-    // día) siguen sin aparecer hasta pulsar ese botón.
+    // Dibuja la ruta origen -> base y carga las opciones del día directamente:
+    // elegir base no dejaba ninguna decisión más al usuario (la hora de salida se
+    // puede ajustar luego), así que el paso "Cargar opciones del día" sobra.
     const ctx = $searchContext;
     if (!ctx) return;
     const mine = ++routeSeq;
@@ -312,8 +323,9 @@
       const rd = await api.planRoute({ origin: ctx.origin, destination: { name: b.name, lat: b.lat, lon: b.lon } });
       if (mine === routeSeq && $chosen === b) routeData.set(rd.route);
     } catch {
-      /* si falla, se recalcula al cargar el plan */
+      /* si falla, loadPlan lo recalcula */
     }
+    if ($chosen === b) void loadPlan();
   }
 
   /* ---- Cargar plan del día --------------------------------------------- */
@@ -537,30 +549,38 @@
 </script>
 
 {#snippet planContent()}
-  {#if $chosen && !editingSearch}
-    <!-- Base elegida: barra de viaje + (preparar el día  |  preferencias + opciones) -->
+  {#if $searchContext && !editingSearch}
+    <!-- Barra de viaje: ya visible al listar finales de etapa (destino = "Zona
+         de …" con la distancia al orientativo); pasa al nombre de la base al elegirla. -->
     <div class="trip-bar">
       <span class="trip-route tnum">
-        <strong>{originText}</strong> → <strong>{$chosen.name}</strong>
-        <span class="trip-km">{Math.round(currentDay?.roadKm ?? $chosen.roadKm)} km</span>
+        <strong>{originText}</strong> → <strong>{tripDest}</strong>
+        {#if tripKm}<span class="trip-km">{tripKm} km</span>{/if}
       </span>
       <button class="trip-edit" type="button" onclick={() => (editingSearch = true)}>cambiar</button>
     </div>
 
-    {#if !hasPlan}
+    {#if !$chosen}
+      {#if results.length}
+        <section class="card" in:fly={{ y: 12, duration: dur(240) }}>
+          <h2>Finales de etapa</h2>
+          <BaseResults
+            {results}
+            disclaimer={$baseResults.disclaimer}
+            targetName={$searchContext?.target?.name}
+            chosenId={null}
+            onchoose={chooseBase}
+          />
+        </section>
+      {/if}
+    {:else if !hasPlan}
       <section class="card" in:fly={{ y: 10, duration: dur(220) }}>
-        <h2>Preparar el día</h2>
-        <div class="prep">
-          <label>
-            <span>Hora de salida</span>
-            <input type="time" bind:value={$departureTime} />
-          </label>
-          <button class="go" type="button" onclick={loadPlan} disabled={$planning.busy}>
-            {$planning.busy ? "Cargando…" : "Cargar opciones del día"}
-          </button>
-        </div>
+        <h2>Preparando el día…</h2>
         <Progress steps={$planning.steps} />
         {#if $planning.status}<p class="status" class:status--error={$planning.error}>{$planning.status}</p>{/if}
+        {#if $planning.error && !$planning.busy}
+          <button class="go" type="button" onclick={loadPlan}>Reintentar</button>
+        {/if}
       </section>
     {:else}
       <section class="card card--flush" in:fly={{ y: 10, duration: dur(220) }}>
@@ -576,13 +596,13 @@
       </section>
     {/if}
   {:else}
-    <!-- Búsqueda / elección de base -->
+    <!-- Búsqueda / edición de la etapa -->
     <section class="card">
       <div class="card-head">
         <h2>Buscar final de etapa</h2>
         <div class="card-head__actions">
           <button class="link-btn" type="button" onclick={() => fileInput?.click()}>Cargar viaje</button>
-          {#if $chosen}
+          {#if $searchContext}
             <button class="link-btn" type="button" onclick={() => (editingSearch = false)}>volver</button>
           {/if}
         </div>
@@ -590,19 +610,6 @@
       {#if tripMsg}<p class="status status--error">{tripMsg}</p>{/if}
       <SearchPanel onsearch={runSearch} />
     </section>
-
-    {#if results.length}
-      <section class="card" in:fly={{ y: 12, duration: dur(240) }}>
-        <h2>Finales de etapa</h2>
-        <BaseResults
-          {results}
-          disclaimer={$baseResults.disclaimer}
-          targetName={$searchContext?.target?.name}
-          chosenId={$chosen ? ($chosen.id ?? $chosen.name) : null}
-          onchoose={chooseBase}
-        />
-      </section>
-    {/if}
   {/if}
 {/snippet}
 
@@ -614,28 +621,29 @@
 
 {#snippet mobileTaskView(task)}
   {#if task === "search"}
-    <button class="m-load" type="button" onclick={() => fileInput?.click()}>📂 Cargar viaje guardado</button>
-    {#if tripMsg}<p class="status status--error">{tripMsg}</p>{/if}
-    <SearchPanel onsearch={runSearch} />
-    {#if results.length}
-      <h3 class="m-sub">Finales de etapa</h3>
+    {#if $searchContext && !editingSearch && results.length}
+      <div class="m-editbar">
+        <span class="tnum">{originText} → {tripDest}{#if tripKm} · {tripKm} km{/if}</span>
+        <button class="link-btn" type="button" onclick={() => (editingSearch = true)}>cambiar</button>
+      </div>
       <BaseResults
         {results}
         disclaimer={$baseResults.disclaimer}
         targetName={$searchContext?.target?.name}
-        chosenId={$chosen ? ($chosen.id ?? $chosen.name) : null}
-        onchoose={(b) => { chooseBase(b); editingSearch = false; mobileTask.set("prep"); }}
+        chosenId={null}
+        onchoose={(b) => { chooseBase(b); editingSearch = false; mobileTask.set(null); }}
       />
+    {:else}
+      <button class="m-load" type="button" onclick={() => fileInput?.click()}>📂 Cargar viaje guardado</button>
+      {#if tripMsg}<p class="status status--error">{tripMsg}</p>{/if}
+      <SearchPanel onsearch={runSearch} />
     {/if}
   {:else if task === "prep"}
-    <div class="prep">
-      <label><span>Hora de salida</span><input type="time" bind:value={$departureTime} /></label>
-      <button class="go" type="button" onclick={loadPlan} disabled={$planning.busy}>
-        {$planning.busy ? "Cargando…" : "Cargar opciones del día"}
-      </button>
-    </div>
     <Progress steps={$planning.steps} />
     {#if $planning.status}<p class="status" class:status--error={$planning.error}>{$planning.status}</p>{/if}
+    {#if $planning.error && !$planning.busy}
+      <button class="go" type="button" onclick={loadPlan}>Reintentar</button>
+    {/if}
   {:else if task === "tune"}
     <label class="m-time"><span>Hora de salida</span><input type="time" bind:value={$departureTime} /></label>
     <PreferencesBar />
@@ -672,7 +680,7 @@
   <header class="brand">
     <div class="brand__mark">
       <span class="dot"></span>
-      Travel Planner <small>v1.2.29</small>
+      Travel Planner <small>v1.2.30</small>
     </div>
     {#if !narrow && hasPlan}
       <button
@@ -715,11 +723,11 @@
 
   {#if narrow}
     <!-- Móvil / tablet: mapa a pantalla completa + barra de tareas + hoja enfocada -->
-    {#if $chosen && !editingSearch}
+    {#if $searchContext && !editingSearch}
       <div class="m-trip">
         <span class="m-trip__r tnum">
-          <strong>{originText}</strong> → <strong>{$chosen.name}</strong>
-          <span class="m-trip__km">{Math.round(currentDay?.roadKm ?? $chosen.roadKm)} km</span>
+          <strong>{originText}</strong> → <strong>{tripDest}</strong>
+          {#if tripKm}<span class="m-trip__km">{tripKm} km</span>{/if}
         </span>
         <button class="m-trip__edit" type="button" onclick={() => { editingSearch = true; mobileTask.set("search"); }}>cambiar</button>
       </div>
@@ -728,6 +736,7 @@
     <MobileBar
       hasBase={!!$chosen && !editingSearch}
       hasPlan={hasPlan}
+      hasSearch={!!$searchContext && !editingSearch}
       endLabel={hasPlan && itin.endTime ? `~${fromMin(itin.endTime)}` : ""}
     />
 
@@ -1030,11 +1039,6 @@
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  .m-sub {
-    margin: 16px 0 8px;
-    font-size: var(--fs-13);
-    font-weight: 800;
-  }
   .m-time {
     display: grid;
     gap: 4px;
@@ -1134,6 +1138,17 @@
     color: var(--text-faint);
   }
   .resume__x:hover { color: var(--text); }
+  .m-editbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+    font-size: var(--fs-12);
+    color: var(--text-soft);
+  }
   .m-load {
     width: 100%;
     margin-bottom: 12px;
@@ -1204,26 +1219,6 @@
     background: var(--accent-tint);
   }
 
-  .prep {
-    display: flex;
-    gap: var(--sp-3);
-    align-items: end;
-    flex-wrap: wrap;
-  }
-  .prep label {
-    display: grid;
-    gap: 3px;
-    font-size: var(--fs-12);
-    font-weight: 700;
-    color: var(--text-soft);
-  }
-  .prep input {
-    height: 42px;
-    padding: 0 var(--sp-3);
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: var(--r-sm);
-  }
   .go {
     height: 42px;
     padding: 0 var(--sp-4);
