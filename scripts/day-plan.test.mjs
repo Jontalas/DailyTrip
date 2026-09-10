@@ -258,6 +258,81 @@ test('ordenación obedece costes dirigidos de carretera, no la proximidad',()=>{
   assert.deepEqual(orderDay(stops,origin,matrix).map(s=>s.item.name),['B','A']);
 });
 
+const MEALS={lunch:{target:840,limit:900},dinner:{target:1200,limit:1260}};
+
+test('con opts, orderDay reordena la ruta para colgar la comida antes de las 15:00',()=>{
+  const O={id:'O',name:'O',lat:36,lon:0};
+  const r1={id:'r1',name:'r1',lat:36,lon:1,routeProgressPct:20};
+  const lu={id:'lu',name:'lu',lat:36,lon:1.5,routeProgressPct:30,lunchPhase:'route'};
+  const r2={id:'r2',name:'r2',lat:36,lon:2,routeProgressPct:40};
+  const B={id:'B',name:'B',lat:36,lon:5};
+  const stops=dayStops({...emptySelected(),route:[r1,r2],lunch:lu},B); // [r1, lu, r2, base] por progreso
+  // Matriz en segundos, orden de índices [O, r1, lu, r2, B].
+  const S=[
+    [   0, 600, 900,1200,3000],
+    [ 600,   0, 300, 600,2400],
+    [ 900, 300,   0, 300,2100],
+    [1200, 600, 300,   0,1800],
+    [3000,2400,2100,1800,   0]
+  ];
+  // r1 dura 320 min: en el orden de mínima conducción la comida caería > 15:00.
+  const opts={departureMin:570,durationOf:x=>({r1:320,lu:60,r2:30}[x.id]??0),meals:MEALS};
+  assert.deepEqual(orderDay(stops,O,S).map(s=>s.item.id),['r1','lu','r2','B']);      // sin opts: mínima conducción
+  assert.deepEqual(orderDay(stops,O,S,opts).map(s=>s.item.id),['lu','r1','r2','B']); // con opts: comida adelantada
+});
+
+test('con opts pero sin comida ni cena, orderDay ordena igual que sin opts',()=>{
+  const stops=dayStops({route:[],activities:[p('A',2.1),p('B',2.2)],lunch:null,hotel:null,dinner:null},chosen);
+  const matrix=[[0,1,50,50],[1,0,20,1],[50,20,0,30],[50,1,1,0]];
+  const opts={departureMin:570,durationOf:x=>x.durationMin,meals:MEALS};
+  assert.deepEqual(orderDay(stops,origin,matrix,opts).map(s=>s.item.name),
+                   orderDay(stops,origin,matrix).map(s=>s.item.name));
+});
+
+test('routeDay sólo activa la ordenación por hora cuando hay restaurante elegido',async()=>{
+  const req=async url=>{
+    const u=new URL(url),pts=u.pathname.split('/').at(-1).split(';').map(x=>Number(x.split(',')[0]));
+    if(u.pathname.includes('/table/')){
+      const a=u.searchParams.get('sources').split(';').map(Number),b=u.searchParams.get('destinations').split(';').map(Number);
+      return {durations:a.map(i=>b.map(j=>Math.abs(pts[i]-pts[j])*600))};
+    }
+    return {routes:[{legs:pts.slice(1).map((x,i)=>({duration:Math.abs(x-pts[i])*600,distance:1000})),geometry:{coordinates:pts.map(x=>[x,36])}}]};
+  };
+  const base={...emptySelected(),route:[p('R',1)],activities:[p('Act',3)]};
+  const noMeal=await routeDay({origin,chosen,selected:base},req,'https://osrm.test');
+  const noMealDep=await routeDay({origin,chosen,selected:base,departureMin:570,durations:{}},req,'https://osrm.test');
+  // Sin comida/cena, la hora de salida no cambia el orden.
+  assert.deepEqual(noMeal.stops.map(s=>s.item.id),noMealDep.stops.map(s=>s.item.id));
+});
+
+test('una comida elegida puede caer antes de las 12:30 (sin suelo) y una cena antes de las 19:00',()=>{
+  const near={id:'b',name:'Base',lat:36,lon:.01};
+  const lunch={id:'r',name:'Rest',lat:36,lon:.02,lunchPhase:'destination'};
+  const rLunch=buildItinerary({chosen:near,routeData:{coords:[origin,near],durationMin:10},
+    selected:{...emptySelected(),lunch},departureMin:570,durationOf:()=>15});
+  assert.ok(rLunch.events.find(e=>e.kind==='lunch').time<750);
+  assert.ok(!rLunch.warnings.some(w=>w.includes('15:00')));
+
+  const dinner={id:'d',name:'Cena',lat:36,lon:.02};
+  const rDinner=buildItinerary({chosen:near,routeData:{coords:[origin,near],durationMin:10},
+    selected:{...emptySelected(),dinner},departureMin:600,durationOf:()=>15});
+  assert.ok(rDinner.events.find(e=>e.kind==='dinner').time<1140);
+});
+
+test('aviso cuando ni reordenando cabe la comida antes de las 15:00 o la cena antes de las 21:00',()=>{
+  const near={id:'b',name:'Base',lat:36,lon:.01};
+  const lunch={id:'r',name:'Rest',lat:36,lon:.02,lunchPhase:'destination'};
+  const rLunch=buildItinerary({chosen:near,routeData:{coords:[origin,near],durationMin:10},
+    selected:{...emptySelected(),lunch},departureMin:920,durationOf:()=>20});
+  assert.ok(rLunch.events.find(e=>e.kind==='lunch').time>900);
+  assert.ok(rLunch.warnings.some(w=>w.includes('15:00')));
+
+  const dinner={id:'d',name:'Cena',lat:36,lon:.02};
+  const rDinner=buildItinerary({chosen:near,routeData:{coords:[origin,near],durationMin:10},
+    selected:{...emptySelected(),dinner},departureMin:1280,durationOf:()=>15});
+  assert.ok(rDinner.warnings.some(w=>w.includes('21:00')));
+});
+
 test('reintento parcial incorpora mejores opciones y elimina sólo las de menor interés',async()=>{
   const result=await loadCategory(async()=>({status:'partial',source:'wikipedia',items:[{id:'nuevo',interestScore:90}],selection:{target:1,available:2,complete:false}}),[{id:'anterior',interestScore:20}]);
   assert.equal(result.items[0].id,'nuevo');assert.equal(result.items.length,1);assert.equal(result.status,'degraded');

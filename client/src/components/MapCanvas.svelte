@@ -22,7 +22,9 @@
     theme = "system",
     pools = null,
     selected = null,
-    openGroup = null
+    openGroup = null,
+    departureMin = 570,
+    durations = null
   } = $props();
 
   let el;
@@ -124,7 +126,7 @@
     ctl.clearSpur();
     const candidate=routingSelection({...selected,route:[...selected.route,stop]});
     const timer=setTimeout(()=>api
-      .planDay({origin,chosen,selected:candidate})
+      .planDay({origin,chosen,selected:candidate,departureMin,durations})
       .then((d) => {
         if (mine !== spurSeq || $hoveredOptionId !== id) return;
         if (d?.source==='osrm' && d.segments?.length) ctl.drawSpur(d.segments.flatMap((s,i)=>i?s.slice(1):s), level, chip);

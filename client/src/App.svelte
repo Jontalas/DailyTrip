@@ -86,7 +86,16 @@
   let dayError = $state('');
   let dayRetry = $state(0);
   let daySeq = 0;
-  let dayKey = $derived(daySignature({selected:$selected,chosen:$chosen,routeData:$routeData}));
+  // Hora de salida y duraciones efectivas: entran en la firma del día porque la
+  // ordenación se hace consciente de la hora cuando hay comida/cena elegida.
+  let depMin = $derived(toMin($departureTime || "09:30"));
+  let durationsMap = $derived.by(() => {
+    const m = {};
+    for (const it of [...$selected.route, ...$selected.activities, $selected.lunch, $selected.hotel, $selected.dinner].filter(Boolean))
+      m[it.id] = selectedDuration(it, $customDurations);
+    return m;
+  });
+  let dayKey = $derived(daySignature({selected:$selected,chosen:$chosen,routeData:$routeData,departureMin:depMin,durations:durationsMap}));
   let currentDay = $derived(dayResult?.key === dayKey ? dayResult : null);
   let categoryState = $state({});
   let catalogRoute = null;
@@ -103,7 +112,6 @@
     food: [...(viewPools.food || []), ...($selected.dinner && !(viewPools.food || []).some(x=>x.id===$selected.dinner.id) ? [$selected.dinner] : [])],
     route: [...(viewPools.route || []), ...$customStops]
   });
-  let depMin = $derived(toMin($departureTime || "09:30"));
   let results = $derived($baseResults.results || []);
 
   /* ---- Búsqueda ------------------------------------------------------- */
@@ -368,7 +376,7 @@
   // One response supplies the ordering, road geometry and every travel time.
   $effect(() => {
     const key=dayKey, retry=dayRetry;
-    const {sel,ch,rd}=untrack(()=>({sel:$selected,ch:$chosen,rd:$routeData}));
+    const {sel,ch,rd,dep,durs}=untrack(()=>({sel:$selected,ch:$chosen,rd:$routeData,dep:depMin,durs:durationsMap}));
     const mine=++daySeq;
     const generation=planSeq;
     clearTimeout(catalogTimer);
@@ -377,7 +385,7 @@
     dayBusy=true;
     const timer=setTimeout(async()=>{
       try {
-        const response=await api.planDay({origin:rd.coords[0],chosen:ch,selected:sel});
+        const response=await api.planDay({origin:rd.coords[0],chosen:ch,selected:sel,departureMin:dep,durations:durs});
         if(mine!==daySeq) return;
         dayResult={...response,key};
         const points=[rd.coords[0],...response.stops.map(s=>s.item)];
@@ -494,6 +502,8 @@
     pools={hasPlan ? planPools : null}
     selected={$selected}
     openGroup={$openOptionGroup}
+    departureMin={depMin}
+    durations={durationsMap}
   />
 
   <header class="brand">

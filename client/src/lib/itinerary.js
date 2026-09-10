@@ -2,11 +2,13 @@
    Tramos por pares dirigidos: las respuestas de otra secuencia no se reutilizan
    por posición. Las duraciones del usuario se aplican también a la viabilidad. */
 import { fromMin, approxLocalTravelMin } from "./format.js";
-import {dayStops,orderDay} from './day-plan.js';
-export const LUNCH_START = 750;
-export const LUNCH_END = 870;
-export const DINNER_MIN = 1140;
+import {dayStops,orderDay,LUNCH_TARGET,LUNCH_LIMIT,DINNER_TARGET,DINNER_LIMIT} from './day-plan.js';
+export const LUNCH_START = 750;   // 12:30 — bloque reservado (sin restaurante)
+export const LUNCH_END = 870;     // 14:30 — fin del bloque reservado
+export const DINNER_MIN = 1140;   // 19:00 — ya no se fuerza; se conserva por compatibilidad
 export const DAY_END = 1350;
+// Restaurante de comida/cena elegido a mano: objetivo 14:00 / 20:00, límite 15:00 / 21:00.
+export {LUNCH_TARGET,LUNCH_LIMIT,DINNER_TARGET,DINNER_LIMIT};
 export const legKey = (a,b) => `${a.lat},${a.lon}>${b.lat},${b.lon}`;
 
 export function itineraryStops(selected,chosen=null,origin=null,orderedStops=null) {
@@ -96,13 +98,15 @@ export function buildItinerary({originName="Origen",chosen,routeData,selected,du
     const mins=kind==='hotelReturn'?0:durationOf(item);
     if(!selected.lunch && !lunchDone && (kind==="route" || kind==="activity") && t+mins>LUNCH_END) reservedLunch();
     if(kind==="lunch") {
-      t=Math.max(t,LUNCH_START);
-      if(t>LUNCH_END) warnings.push("La comida seleccionada empieza después de las 14:30. Cambia el restaurante, las paradas o la salida.");
+      // Sin límite inferior: la comida elegida puede caer a cualquier hora antes
+      // del tope. El servidor ya intenta reordenar para acercarla a las 14:00.
+      if(t>LUNCH_LIMIT) warnings.push(`Ni reordenando cabe la comida antes de las 15:00: quedaría hacia las ${fromMin(t)}. Prueba con otro restaurante, otras paradas o salir antes.`);
       lunchDone=true;
     }
     if(kind==="dinner") {
       if(!selected.lunch && !lunchDone) reservedLunch();
-      t=Math.max(t,DINNER_MIN);
+      // Sin límite inferior; el servidor la acerca a las 20:00 y la mantiene < 21:00 si puede.
+      if(t>DINNER_LIMIT) warnings.push(`Ni reordenando cabe la cena antes de las 21:00: quedaría hacia las ${fromMin(t)}. Prueba con otro restaurante, menos actividades o salir antes.`);
     }
     push(label,item.name,mins,kind,item);
   };
@@ -140,7 +144,7 @@ export function isLunchViable(args) {
   const selected={...(args.selected || {route:args.selectedRoute || [],activities:[],hotel:null,dinner:null}),lunch:args.item};
   const result=buildItinerary({...args,selected});
   const lunch=result.events.find(e=>e.kind==="lunch");
-  return !!lunch && lunch.time<=LUNCH_END;
+  return !!lunch && lunch.time<=LUNCH_LIMIT;
 }
 export function leftTimelineValue(e) {
   if(e.phase!=="travel") return fromMin(e.time);

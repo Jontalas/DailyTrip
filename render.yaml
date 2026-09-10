@@ -22,7 +22,7 @@ services:
       - key: GOOGLE_PLACES_API_KEY
         sync: false
       - key: APP_USER_AGENT
-        value: "TravelPlannerPersonal/1.2.24 (personal-use)"
+        value: "TravelPlannerPersonal/1.2.25 (personal-use)"
       - key: NOMINATIM_URL
         value: "https://nominatim.openstreetmap.org"
       - key: OSRM_URL

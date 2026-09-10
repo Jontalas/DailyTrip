@@ -1346,11 +1346,20 @@ Más información ↗
 
 # 20. COMIDA
 
-Ventana obligatoria:
+**Bloque reservado (sin restaurante elegido).** Ventana obligatoria:
 
 ```text
 12:30–14:30
 ```
+
+**Restaurante elegido a mano (desde v1.2.25).** No hay ventana ni suelo: la
+parada se coloca **lo más cerca de las 14:00 posible y siempre antes de las
+15:00** cuando algún orden válido lo permite; puede caer a cualquier hora antes
+de ese tope. El servidor reordena ruta y paradas para conseguirlo
+(`orderDay(..., opts)`, ver §29). Si ni reordenando cabe antes de las 15:00, se
+mantiene el mejor plan y el itinerario añade un aviso; nunca se bloquea.
+Constantes: `LUNCH_TARGET=840` (14:00), `LUNCH_LIMIT=900` (15:00) en
+`day-plan.js`.
 
 ## Opciones
 
@@ -1728,19 +1737,44 @@ antes alimentaba un filtro `visibleActivities` que se ha eliminado.
 
 Las ya seleccionadas permanecen visibles igualmente.
 
+## Ordenación consciente de la hora (comida y cena elegidas) — desde v1.2.25
+
+Cuando hay un restaurante de **comida** y/o **cena** seleccionado, la ordenación
+del día deja de mirar sólo la conducción:
+
+- `orderDay(stops, origin, matrix, opts)` recibe `opts = {departureMin,
+  durationOf, meals}`. El coste de una secuencia pasa a ser
+  `conducciónMin + Σ mealTimePenalty(horaLlegada)`.
+- `mealTimePenalty(a, target, limit)` (en `day-plan.js`): tirón suave hacia el
+  objetivo si se llega antes (`×0.2`), coste lineal al pasarlo (`×1`), y un salto
+  de `+10000` al pasar del límite para que reordenar gane a cualquier ahorro de
+  conducción realista.
+- Objetivos/límites: **comida 14:00 / 15:00**, **cena 20:00 / 21:00**
+  (`LUNCH_TARGET/LUNCH_LIMIT`, `DINNER_TARGET/DINNER_LIMIT`). Sin límite inferior:
+  la parada puede caer a cualquier hora antes del tope.
+- Se reordenan sólo paradas `route`/`activity` (el ajuste fino del hill-climb),
+  conservando todas las restricciones de `valid()` (frontera de base, actividades
+  tras la base, nada tras la cena, `hotelReturn` al final).
+- El hill-climb corre siempre que hay `opts`, aunque `optimalOrder` (que sólo
+  minimiza conducción) haya dado una solución exacta.
+- **Mejor esfuerzo:** si ningún orden válido coloca la comida antes de las 15:00
+  (o la cena antes de las 21:00), se conserva el mejor plan y `buildItinerary`
+  añade un aviso («Ni reordenando cabe la comida antes de las 15:00…»). Nunca se
+  bloquea la selección.
+
+Ruta de datos: `App.svelte` manda `departureMin` y `durations` (mapa
+`id → minutos efectivos`, de `customDurations` + `recommendedMinutes`) en
+`POST /api/plan/day`; `daySignature` los incluye **sólo si hay comida/cena
+elegida** (firma byte a byte igual en el resto de casos); `routeDay` construye
+`opts` sólo en ese caso. Cache key `day:v6:` → `day:v7:`.
+
 ## Lunch viability
 
-Para comida en ruta:
-
-- estima hora según progreso de la ruta;
-- suma duraciones de paradas anteriores;
-- comprueba que no llegue después de 14:30.
-
-Para comida en destino:
-
-- estima llegada;
-- suma paradas;
-- comprueba `arrival <= 14:30`.
+- Comida en ruta: estima la hora por progreso de ruta + duración de las paradas
+  anteriores; `isLunchViable` comprueba `arrival <= 15:00` (`LUNCH_LIMIT`).
+- Comida en destino: estima llegada + paradas; misma comprobación.
+- `updateViability`/`lateLunchKeys` alimentan el aviso `lateArrival` de
+  `OptionCard`, nunca un filtro (las opciones no se ocultan, ver arriba).
 
 ---
 
@@ -2336,6 +2370,83 @@ Al crearla:
 ---
 
 # 43. CHANGELOG DE CONTINUIDAD
+
+## v1.2.25 — Comida cerca de las 14:00 y cena cerca de las 20:00, reordenando si hace falta
+
+- **Motivo.** Pedido del propietario: si hay restaurante de comida elegido, la
+  parada debe quedar lo más cerca de las 14:00 posible y **siempre antes de las
+  15:00** cuando sea alcanzable, aunque haya que cambiar la ruta y el orden de
+  las paradas. Igual para la cena con las 20:00 / 21:00. Sin límite inferior.
+- **Problema.** La ordenación del día (`orderDay`) sólo minimizaba conducción y
+  no tenía noción de la hora. Además el itinerario **forzaba** la comida a no
+  empezar antes de las 12:30 (`LUNCH_START`) y la cena antes de las 19:00
+  (`DINNER_MIN`), lo que impedía que un restaurante elegido cayera antes.
+- **Comportamiento anterior.**
+  - `visit()` en `itinerary.js`: `t = Math.max(t, LUNCH_START)` para la comida
+    elegida y `t = Math.max(t, DINNER_MIN)` para la cena.
+  - `isLunchViable` comparaba contra `LUNCH_END` (14:30).
+  - `orderDay(stops, origin, costs)` — coste = sólo conducción.
+  - `POST /api/plan/day` no recibía hora de salida ni duraciones.
+- **Comportamiento nuevo.**
+  - Constantes nuevas en `day-plan.js`: `LUNCH_TARGET=840`, `LUNCH_LIMIT=900`,
+    `DINNER_TARGET=1200`, `DINNER_LIMIT=1260` (re-exportadas por `itinerary.js`).
+  - `mealTimePenalty(a, target, limit)` en `day-plan.js`: `×0.2` antes del
+    objetivo, `×1` entre objetivo y límite, `+10000` pasado el límite.
+  - `orderDay(stops, origin, costs, opts)` — 4º argumento opcional. Con `opts`,
+    `cost(seq) = conducciónMin + Σ mealTimePenalty(horaLlegadaComida/Cena)`,
+    simulando el reloj con `departureMin`, `durationOf` y la matriz (segundos).
+    El hill-climb corre siempre que hay `opts`. Sin `opts`: idéntico a antes.
+  - `visit()` comida/cena elegidas: se quitan los `Math.max` (sin suelo); aviso
+    si `t > LUNCH_LIMIT` / `t > DINNER_LIMIT`. El **bloque reservado** sin
+    restaurante mantiene su ventana 12:30–14:30 intacta.
+  - `isLunchViable` compara contra `LUNCH_LIMIT` (15:00).
+  - `routeDay({..., departureMin, durations})` construye `opts` **sólo si hay
+    comida o cena elegida** y lo pasa a `orderDay`. `daySignature` incluye
+    `departureMin`/`durations` sólo en ese caso (firma igual byte a byte si no).
+    `App.svelte` y `MapCanvas.svelte` mandan ambos en `POST /api/plan/day`.
+    Cache key `day:v6:` → `day:v7:`.
+- **Archivos y funciones.**
+  - `client/src/lib/day-plan.js`: constantes, `mealTimePenalty`, `orderDay(...,opts)`,
+    `daySignature({...,departureMin,durations})`.
+  - `client/src/lib/itinerary.js`: re-export de constantes; `visit()` comida/cena;
+    `isLunchViable`.
+  - `lib/day-routing.js`: `routeDay` construye `opts`.
+  - `server.js`: cache key `day:v7:`.
+  - `client/src/App.svelte`: `durationsMap`, `depMin` en la firma y en `planDay`,
+    props a `MapCanvas`.
+  - `client/src/components/MapCanvas.svelte`: props `departureMin`/`durations`,
+    los pasa al `planDay` del spur.
+  - `client/src/components/OptionCard.svelte`: texto del aviso `lateArrival` (15:00).
+- **Constantes/límites.** `LUNCH_START` (12:30) y `LUNCH_END` (14:30) sólo para el
+  bloque reservado. `DINNER_MIN` (19:00) se conserva exportado pero **ya no se
+  aplica**. `DAY_END` (22:30) sin cambios.
+- **Nuevos invariantes.**
+  - Un restaurante de comida elegido se coloca antes de las 15:00 (objetivo
+    14:00) si algún orden válido lo permite; si no, aviso, nunca bloqueo.
+  - Un restaurante de cena elegido se coloca antes de las 21:00 (objetivo 20:00)
+    con la misma regla.
+  - Una comida/cena elegida no tiene hora mínima.
+  - Sin `opts`, `orderDay` produce exactamente el mismo orden que antes.
+- **Qué se conserva.** Bloque reservado 12:30–14:30 sin restaurante; restricciones
+  de `valid()`; DP `optimalOrder` sin tocar; avisos del itinerario; no ocultar
+  opciones (v1.2.24).
+- **Fallbacks/errores.** Sin `departureMin` en el body → 570 (09:30). Sin duración
+  para un id → `item.durationMin` o 60. Matriz `estimated` (OSRM table caído) →
+  la simulación horaria usa esa estimación y el día no se cachea.
+- **Impacto UI.** Con comida/cena elegida, el orden de las visitas puede cambiar
+  respecto al de mínima conducción para cuadrar la hora; cambiar la hora de
+  salida recalcula el día (antes sólo recalculaba el itinerario en cliente).
+- **Impacto APIs.** El body de `POST /api/plan/day` gana `departureMin` y
+  `durations`. Sin proveedores nuevos.
+- **Compatibilidad.** Cache `day:` invalidada por el cambio de clave (`v6`→`v7`).
+  Sin cambios de formato de datos ni de `selected`/`pools`.
+- **Validación.** `npm run build` OK; `npm test` 45/45 (2 regresiones de horario
+  actualizadas a los valores nuevos + 5 pruebas nuevas de reordenación, avisos y
+  ausencia de suelo); `node --check server.js`.
+- **Limitaciones que permanecen.** Para una comida en ruta cuya posición viene
+  fijada por el progreso del corredor, si el propio corredor es demasiado largo
+  ningún reorden la adelanta: se emite el aviso. El reordenado mueve paradas
+  `route`/`activity`, no el propio punto de comida entre hotel y actividades.
 
 ## v1.2.24 — Modo oscuro por defecto, origen por geolocalización y ninguna opción oculta
 

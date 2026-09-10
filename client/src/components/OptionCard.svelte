@@ -234,7 +234,7 @@
       {#if meal}
         <p class="availability-note">{meal==='lunch' && item.lunchOpening===false ? 'El horario publicado no cubre la comida: podría estar cerrado.' : 'Podría estar cerrado a tu llegada. Confirma el horario con el local.'}</p>
       {/if}
-      {#if lateArrival}<p class="availability-note">Con el plan actual, la llegada para comer sería después de las 14:30. Puedes seleccionarlo y ajustar el itinerario.</p>{/if}
+      {#if lateArrival}<p class="availability-note">Con el orden actual, comer aquí caería después de las 15:00. Al elegirlo se reordena la ruta para acercarlo a las 14:00; si aun así no cabe, verás un aviso.</p>{/if}
       {#if lateFinish}<p class="availability-note">Con el plan actual, elegirla haría terminar el día después de las 22:30. Puedes seleccionarla y ajustar el itinerario.</p>{/if}
       {#if descPreview && !open}
         <p class="preview">{descPreview}</p>

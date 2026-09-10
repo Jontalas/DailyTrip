@@ -36,7 +36,7 @@ const OVERPASS_ENDPOINTS=[
 
 const GEOAPIFY_KEY=(process.env.GEOAPIFY_API_KEY||"").trim();
 const GOOGLE_KEY=(process.env.GOOGLE_PLACES_API_KEY||"").trim();
-const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.24 (personal-use)";
+const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.25 (personal-use)";
 const DEBUG_EXTERNAL=process.env.DEBUG_EXTERNAL==="1";
 const debug=(...a)=>{if(DEBUG_EXTERNAL)console.warn(...a);};
 
@@ -1641,7 +1641,7 @@ app.post('/api/plan/day',async(req,res)=>{
   if(!valid(body?.origin)||!valid(body?.chosen)||!Array.isArray(body?.selected?.route)||!Array.isArray(body?.selected?.activities)) return res.status(400).json({error:'Plan incompleto'});
   const items=[...body.selected.route,...body.selected.activities,body.selected.lunch,body.selected.hotel,body.selected.dinner].filter(Boolean);
   if(!items.every(valid)) return res.status(400).json({error:'Hay lugares sin coordenadas válidas'});
-  const key='day:v6:'+createHash('sha256').update(JSON.stringify(body)).digest('hex');
+  const key='day:v7:'+createHash('sha256').update(JSON.stringify(body)).digest('hex');
   const cached=cacheGet(key);
   if(cached) return res.json(cached.data);
   try {
@@ -1768,4 +1768,4 @@ app.post("/api/plan/route-via",async(req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Travel Planner 1.2.24 en http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`Travel Planner 1.2.25 en http://localhost:${PORT}`));

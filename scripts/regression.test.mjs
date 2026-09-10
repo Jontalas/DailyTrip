@@ -51,15 +51,19 @@ test('comida intercalada entre paradas y tiempos reales de la secuencia',()=>{
   const result=buildItinerary(args);
   assert.deepEqual(result.events.filter(e=>['route','lunch','base','activity'].includes(e.kind)).map(e=>e.name),['Origen','Inicial','Comida','Museo','Final']);
   assert.equal(result.events.filter(e=>e.phase==='travel').reduce((n,e)=>n+e.durationMin,0),240);
-  assert.equal(result.endTime,920);
+  // Un restaurante elegido ya no se retrasa hasta las 12:30: cae cuando toca (12:20)
+  // y el día termina 10 min antes que con el suelo antiguo.
+  assert.equal(result.endTime,910);
   assert.equal(approximateSchedule(args),result.endTime);
   assert.equal(isLunchViable({...args,item:lunch}),true);
 });
-test('viabilidad respeta duraciones personalizadas, desplazamiento al restaurante y cena mínima',()=>{
+test('viabilidad respeta duraciones personalizadas y el desplazamiento al restaurante; sin suelo de cena',()=>{
   const args=fixture({lunch:{...point('Comida'),lunchPhase:'destination',durationMin:10},hotel:{...point('Hotel'),durationMin:10},activities:[point('Museo')],dinner:{...point('Cena'),durationMin:15}});
   args.legCache=exact(args,[240,10,5,5,5]);
-  assert.equal(buildItinerary(args).endTime,1160);
-  assert.equal(approximateSchedule(args),1160);
+  // Una cena elegida ya no se fuerza a las 19:00: puede caer a cualquier hora antes
+  // de las 21:00, así que el día termina mucho antes que con el suelo antiguo (1160).
+  assert.equal(buildItinerary(args).endTime,895);
+  assert.equal(approximateSchedule(args),895);
   args.selected.hotel.durationMin=600;
   assert.equal(approximateSchedule(args),buildItinerary(args).endTime);
   assert.ok(approximateSchedule(args)>1350);

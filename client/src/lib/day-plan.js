@@ -1,6 +1,28 @@
 import { haversineKm } from './format.js';
 import {optimalOrder} from './optimal-order.js';
 
+// Restaurante elegido a mano: se intenta colocar la parada lo más cerca de la
+// hora objetivo posible y SIEMPRE antes del límite (si algún orden válido lo
+// permite). No hay límite inferior: puede caer a cualquier hora antes del tope.
+// El bloque reservado sin restaurante mantiene su ventana 12:30–14:30 (itinerary.js).
+export const LUNCH_TARGET = 840;    // 14:00
+export const LUNCH_LIMIT  = 900;    // 15:00
+export const DINNER_TARGET = 1200;  // 20:00
+export const DINNER_LIMIT  = 1260;  // 21:00
+
+// Pesos de la penalización horaria (minutos). El salto al pasar del límite tiene
+// que dominar cualquier ahorro de conducción realista para que reordenar gane.
+const PENALTY_BEFORE = 0.2;   // tirón suave hacia el objetivo si se llega antes
+const PENALTY_AFTER  = 1;     // coste lineal por minuto pasado el objetivo
+const PENALTY_OVER_LIMIT = 10000;
+
+/** Penaliza la hora de llegada `a` a una comida con objetivo `target` y tope `limit`. */
+export function mealTimePenalty(a, target, limit) {
+  if(a <= target) return (target - a) * PENALTY_BEFORE;
+  if(a <= limit)  return (a - target) * PENALTY_AFTER;
+  return (a - target) * PENALTY_AFTER + PENALTY_OVER_LIMIT;
+}
+
 export function dayStops(selected, chosen) {
   const route = selected.route.map(item => ({item,kind:'route',label:'Parada'}));
   if(selected.lunch?.lunchPhase === 'route') route.push({item:selected.lunch,kind:'lunch',label:'Comida'});
@@ -16,7 +38,16 @@ export function dayStops(selected, chosen) {
 // Directed costs matter: one-way streets make reversing a leg non-equivalent.
 // Relocate visits while retaining meal/check-in anchors and destination boundaries.
 // Strictly decreasing cost guarantees termination and never worsens the initial plan.
-export function orderDay(stops, origin, costs=null) {
+//
+// `opts` (opcional) hace la ordenación consciente de la hora: cuando hay un
+// restaurante de comida y/o cena elegido, el coste deja de ser sólo la
+// conducción y suma la penalización horaria de esa(s) parada(s). Así el orden
+// puede empeorar la conducción con tal de colocar la comida antes de las 15:00
+// (y la cena antes de las 21:00), lo más cerca posible de 14:00 / 20:00.
+// Sin `opts`, el comportamiento es idéntico al histórico (sólo conducción).
+// `opts = { departureMin, durationOf(item)->min, meals:{lunch,dinner:{target,limit}} }`.
+// `matrix`/`costs` va en segundos cuando llega de roadMatrix.
+export function orderDay(stops, origin, costs=null, opts=null) {
   const points=[origin,...stops.map(s=>s.item)];
   const matrix=costs || points.map(a=>points.map(b=>haversineKm(a,b)));
   let order=stops.map((_,i)=>i+1);
@@ -28,7 +59,22 @@ export function orderDay(stops, origin, costs=null) {
   // terminal base is a real waypoint. Never optimize through the town centre
   // when the day continues to a useful destination visit.
   const real=seq=>seq.filter((id,i)=>stops[id-1].kind!=='base' || i===seq.length-1);
-  const cost=seq=>real(seq).reduce((sum,id,i,ids)=>sum+matrix[i ? ids[i-1] : 0][id],0);
+  const travelCost=seq=>real(seq).reduce((sum,id,i,ids)=>sum+matrix[i ? ids[i-1] : 0][id],0);
+  // Penalización horaria de comida/cena para una secuencia dada (minutos).
+  const mealPenalty = opts ? seq=>{
+    const {departureMin,durationOf,meals}=opts;
+    let t=departureMin, prev=0, penalty=0;
+    for(const id of real(seq)){
+      t += matrix[prev][id]/60;
+      const s=stops[id-1];
+      if(s.kind==='lunch') penalty += mealTimePenalty(t, meals.lunch.target, meals.lunch.limit);
+      else if(s.kind==='dinner') penalty += mealTimePenalty(t, meals.dinner.target, meals.dinner.limit);
+      if(s.kind!=='base') t += Number(durationOf(s.item)) || 0;
+      prev=id;
+    }
+    return penalty;
+  } : null;
+  const cost = mealPenalty ? seq=>travelCost(seq)/60 + mealPenalty(seq) : travelCost;
   const valid=seq=>{
     const base=seq.findIndex(id=>stops[id-1].kind==='base');
     if(terminalBase && base!==seq.length-1)return false;
@@ -44,7 +90,9 @@ export function orderDay(stops, origin, costs=null) {
   };
   const exact=optimalOrder(stops,matrix);
   if(exact && cost(exact)<cost(order)-0.001)order=exact;
-  let total=cost(order), improved=!exact;
+  // `optimalOrder` sólo minimiza conducción; con penalización horaria hay que
+  // dejar correr el ajuste fino aunque exista solución exacta de conducción.
+  let total=cost(order), improved=!exact || !!mealPenalty;
   while(improved) {
     improved=false;
     for(const id of [...order]) {
@@ -67,8 +115,14 @@ export function orderDay(stops, origin, costs=null) {
   return result;
 }
 
-export function daySignature({selected,chosen,routeData}) {
+export function daySignature({selected,chosen,routeData,departureMin=null,durations=null}) {
   if(!chosen || !routeData?.coords?.length) return '';
-  return JSON.stringify([routeData.coords[0], ...dayStops(selected,chosen).map(s=>[
-    s.kind,s.item.id,s.item.lat,s.item.lon,!!s.item.custom,s.item.routeProgressPct])]);
+  // La hora de salida y las duraciones sólo cambian el orden del día cuando hay
+  // un restaurante elegido (ordenación consciente de la hora). En el resto de
+  // casos la firma queda byte a byte igual que antes.
+  const timed = !!(selected.lunch || selected.dinner);
+  return JSON.stringify([routeData.coords[0], timed ? departureMin : null,
+    ...dayStops(selected,chosen).map(s=>[
+      s.kind,s.item.id,s.item.lat,s.item.lon,!!s.item.custom,s.item.routeProgressPct,
+      timed && durations ? (durations[s.item.id] ?? null) : null])]);
 }
