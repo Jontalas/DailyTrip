@@ -28,6 +28,7 @@ export async function loadCategory(request, previous = []) {
       items: degraded && previous.length && !coverage && !(result.status==='partial' && items.length) ? previous : result.source === "generated" && previous.length ? previous : items,
       status: degraded ? "degraded" : "ok",
       coverage,
+      selection,
       canRetry: degraded || coverage?.outcome === "sources-exhausted",
       message: message ?? (degraded ? "No se pudo completar la consulta. Se muestra el contenido de respaldo disponible." : "")
     };

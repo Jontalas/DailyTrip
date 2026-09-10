@@ -26,7 +26,8 @@
     lunchOptions = [],
     lateActivityIds = new Set(),
     lateLunchKeys = new Set(),
-    mobile = false
+    mobile = false,
+    aiState = {}
   } = $props();
 
   let routeSel = $derived(new Set($selected.route.map((x) => x.id)));
@@ -106,6 +107,17 @@
   {/if}
 {/snippet}
 
+{#snippet aiStatus(kind)}
+  {#if aiState?.[kind] === "working"}
+    <p class="ai-status ai-status--busy" role="status" aria-live="polite">
+      <span class="ai-spin" aria-hidden="true"></span>
+      Consultando a la IA para completar y reordenar esta lista…
+    </p>
+  {:else if aiState?.[kind] === "ready"}
+    <p class="ai-status ai-status--done">✦ Lista completada y ordenada por la IA</p>
+  {/if}
+{/snippet}
+
 <div class="groups" class:mobile bind:this={listEl}>
   <details class="custom-section" open={$openOptionGroup === "custom"}>
     <summary onclick={(e) => toggle(e, "custom")}>
@@ -152,7 +164,7 @@
     </summary>
 
     {@render loadStatus("route")}
-
+    {@render aiStatus("route")}
 
     <div class="list scroll-y">
       {#each routeOptions as item (item.id)}
@@ -202,6 +214,7 @@
     </summary>
     <div class="list scroll-y">
       {@render loadStatus("activities")}
+      {@render aiStatus("activities")}
       {#each pools.activities || [] as item (item.id)}
         <OptionCard
           {item}
@@ -251,6 +264,35 @@
 
   .load-state { padding: 8px; color: var(--text-soft); font-size: var(--fs-12); }
   .load-state p { margin-bottom: 6px; }
+
+  .ai-status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 2px 6px 4px;
+    padding: 6px 8px;
+    font-size: 11px;
+    line-height: 1.4;
+    border-radius: var(--r-xs);
+  }
+  .ai-status--busy {
+    color: var(--accent-strong, var(--accent));
+    background: var(--accent-tint);
+  }
+  .ai-status--done { color: var(--text-faint); }
+  .ai-spin {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: ai-spin 0.8s linear infinite;
+  }
+  @keyframes ai-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .ai-spin { animation-duration: 2.4s; }
+  }
   .groups {
     display: grid;
     gap: 6px;

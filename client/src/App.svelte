@@ -15,7 +15,7 @@
 
   import { api } from "./lib/api.js";
   import { loadCategory } from "./lib/loading.js";
-  import { applyPreferences } from "./lib/scoring.js";
+  import { applyPreferences, applyAiToPool } from "./lib/scoring.js";
   import { toMin, fromMin } from "./lib/format.js";
   import { dur } from "./lib/motion.js";
   import { approximateSchedule, isLunchViable, buildItinerary, legKey, DAY_END } from "./lib/itinerary.js";
@@ -41,7 +41,8 @@
     openOptionGroup,
     customStops,
     mobileTask,
-    mapPickMode
+    mapPickMode,
+    aiCuration
   } from "./lib/stores.js";
 
   /* ---- Tema ------------------------------------------------------------- */
@@ -166,6 +167,14 @@
     if (narrow) mobileTask.set(null);
     resumeSnap = null;
     tripMsg = "";
+    stopAiPolls();
+    if (planLoaded) {
+      const gen = planSeq;
+      const hasRouteAi = ($pools.route || []).some((x) => x.aiInterest != null);
+      const hasActAi = ($pools.activities || []).some((x) => x.aiInterest != null);
+      ensureAiCuration("route", hasRouteAi, gen);
+      ensureAiCuration("activities", hasActAi, gen);
+    }
   }
 
   async function loadTripFile(e) {
@@ -219,6 +228,9 @@
   let catalogRoute = null;
   let corridorEpoch = 0;
   let catalogTimer;
+  // Consulta a la IA en segundo plano: un contador por sección invalida los
+  // sondeos en curso cuando cambia la base/el corredor.
+  let aiPollSeq = { route: 0, activities: 0 };
   let metricSeq = 0;
 
   let hasPlan = $derived(planLoaded);
@@ -255,6 +267,7 @@
     planSeq++;
     daySeq++;
     categoryState = {};
+    stopAiPolls();
     legCache = new Map();
     planning.set({busy:false,steps:[],status:""});
     originText = q.origin;
@@ -343,6 +356,7 @@
     const destination = { name: ch.name, lat: ch.lat, lon: ch.lon };
     const mine = ++planSeq;
     categoryState = {};
+    stopAiPolls();
 
     resetPlan();
     planLoaded = false;
@@ -435,6 +449,8 @@
     const issue = states.find(x=>x.status!=="ok");
     categoryState = {...categoryState,[key]:issue || states[0] || {status:"ok",message:""}};
     if(key==='route' && $activeRoute && rd!==$activeRoute)refreshRouteMetrics($activeRoute,generation);
+    if(key==='route') ensureAiCuration('route', states[0]?.coverage?.ai?.ok===true, generation);
+    if(key==='activities') ensureAiCuration('activities', states[0]?.selection?.aiOk===true, generation);
   }
 
   async function refreshRouteMetrics(rd,generation=planSeq) {
@@ -445,6 +461,74 @@
     pools.update(p=>({...p,route:p.route.map(x=>byId.get(x.id)||x)}));
     if(result.degraded && categoryState.route?.status!=='loading')categoryState={...categoryState,
       route:{...categoryState.route,status:'degraded',canRetry:true,message:'Algunas métricas del nuevo recorrido son estimadas. Puedes reintentarlas.'}};
+  }
+
+  /* ---- Curación por IA en segundo plano ------------------------------------
+     Tras cargar las opciones, si la IA no llegó en línea (Gemini lento), se
+     sondea `/api/ai/curate` hasta que responde; al llegar se fusiona en el pool
+     y `applyPreferences` reordena solo. `aiCuration` alimenta el indicador. */
+  function stopAiPolls() {
+    aiPollSeq.route++;
+    aiPollSeq.activities++;
+    aiCuration.set({ route: "idle", activities: "idle" });
+  }
+
+  async function mergeAiResult(kind, result, generation) {
+    if (generation !== planSeq) return;
+    const poolKey = kind === "route" ? "route" : "activities";
+    pools.update((p) => ({ ...p, [poolKey]: applyAiToPool(p[poolKey], result) }));
+    if (kind !== "route" || !(result.items || []).length) return;
+    const rd = $activeRoute || $routeData;
+    if (!rd) return;
+    try {
+      const m = await api.metricsRouteOptions({ route: rd, items: $pools.route });
+      if (generation !== planSeq) return;
+      const byId = new Map(m.items.map((x) => [x.id, x]));
+      pools.update((p) => ({ ...p, route: p.route.map((x) => byId.get(x.id) || x) }));
+    } catch {}
+  }
+
+  async function pollAiCuration(kind, generation = planSeq) {
+    const ch = $chosen;
+    if (!ch) return;
+    const rd = kind === "route" ? ($activeRoute || $routeData) : null;
+    if (kind === "route" && !rd?.coords?.length) return;
+    const mySeq = ++aiPollSeq[kind];
+    const destination = { name: ch.name, lat: ch.lat, lon: ch.lon, type: ch.type, population: ch.population };
+    aiCuration.update((s) => ({ ...s, [kind]: "working" }));
+    const until = Date.now() + 5 * 60 * 1000;
+    let delay = 3500;
+    while (Date.now() < until) {
+      if (mySeq !== aiPollSeq[kind] || generation !== planSeq) return;
+      let r;
+      try {
+        r = await api.aiCurate({
+          kind,
+          route: kind === "route" ? { coords: rd.coords, roadKm: rd.roadKm } : undefined,
+          destination
+        });
+      } catch {
+        r = { status: "error" };
+      }
+      if (mySeq !== aiPollSeq[kind] || generation !== planSeq) return;
+      if (r.status === "off") { aiCuration.update((s) => ({ ...s, [kind]: "idle" })); return; }
+      if (r.status === "ready") {
+        await mergeAiResult(kind, r, generation);
+        if (mySeq === aiPollSeq[kind] && generation === planSeq)
+          aiCuration.update((s) => ({ ...s, [kind]: "ready" }));
+        return;
+      }
+      await new Promise((res) => setTimeout(res, delay));
+      delay = Math.min(Math.round(delay * 1.4), 15000);
+    }
+    aiCuration.update((s) => ({ ...s, [kind]: s[kind] === "ready" ? "ready" : "idle" }));
+  }
+
+  // Arranca (o no) el sondeo de una sección según si la IA ya llegó en línea.
+  function ensureAiCuration(kind, inlineOk, generation = planSeq) {
+    if (generation !== planSeq) return;
+    if (inlineOk) { aiCuration.update((s) => ({ ...s, [kind]: "ready" })); return; }
+    void pollAiCuration(kind, generation);
   }
 
   function refreshCorridor(rd,generation) {
@@ -598,6 +682,7 @@
           {lateActivityIds}
           {lateLunchKeys}
           {categoryState}
+          aiState={$aiCuration}
           onretry={(key) => retryCategory(key)}
         />
       </section>
@@ -664,6 +749,7 @@
       {lateActivityIds}
       {lateLunchKeys}
       {categoryState}
+      aiState={$aiCuration}
       onretry={(key) => retryCategory(key)}
     />
   {/if}
@@ -687,7 +773,7 @@
   <header class="brand">
     <div class="brand__mark">
       <span class="dot"></span>
-      Travel Planner <small>v1.2.34</small>
+      Travel Planner <small>v1.2.35</small>
     </div>
     {#if !narrow && hasPlan}
       <button

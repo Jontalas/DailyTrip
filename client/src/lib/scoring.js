@@ -48,6 +48,43 @@ export function adjustedInterest(item, prefs) {
   return Math.max(1, Math.min(100, baseInterest(item) + preferenceBonus(item, prefs)));
 }
 
+/* Normalización de nombre — igual que la del servidor (lib/ai-curator.js) — para
+   casar la nota de la IA con una opción ya presente en el pool. */
+export function normName(s) {
+  return String(s || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/* Fusiona en un pool el resultado de `/api/ai/curate` (segundo plano):
+   1) anota `aiInterest`/`aiReason` en las opciones ya presentes cuyo nombre
+      casa con el ranking de la IA;
+   2) añade las candidatas nuevas de la IA que no estuvieran ya (por id o nombre).
+   NO ordena: de eso se encarga `applyPreferences` sobre el pool resultante.
+   Devuelve el nuevo array (o el mismo si no hay nada que aplicar). */
+export function applyAiToPool(pool, result) {
+  const list = Array.isArray(pool) ? pool : [];
+  if (!result || (result.status && result.status !== "ready")) return list;
+  const ranking = result.ranking || {};
+  const reasons = result.reasons || {};
+  const byId = new Set(list.map((x) => x.id));
+  const byName = new Set(list.map((x) => normName(x.name)));
+  const annotated = list.map((x) => {
+    if (x.aiInterest != null) return x;
+    const k = normName(x.name);
+    return ranking[k] != null
+      ? { ...x, aiInterest: ranking[k], aiReason: x.aiReason || reasons[k] || "" }
+      : x;
+  });
+  const additions = (result.items || []).filter(
+    (it) => it && !byId.has(it.id) && !byName.has(normName(it.name))
+  );
+  return additions.length ? [...annotated, ...additions] : annotated;
+}
+
 export function adjustedStageValue(item, prefs) {
   const base = item.aiInterest != null && Number.isFinite(Number(item.aiInterest))
     ? Number(item.aiInterest)

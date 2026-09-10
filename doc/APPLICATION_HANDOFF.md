@@ -2420,6 +2420,47 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.35 — La IA se sigue consultando en segundo plano y actualiza las listas al llegar
+
+- **Motivo.** Gemini flash sufre picos de "high demand": la vía en línea (tope de
+  12 s en v1.2.33-34) fallaba a menudo y la búsqueda quedaba sin curación de IA
+  hasta recargar. Se pide: seguir preguntando en segundo plano hasta que
+  responda, fusionar/reordenar las listas al vuelo, y un indicador de que se
+  está consultando.
+- **Servidor.**
+  - `aiCurateAndGeocode({kind,route,destination,index})`: helper compartido
+    (curación + geocodificación + validación) que usan la vía en línea y el
+    trabajo de fondo.
+  - Vía en línea: tope reducido a **6 s** (`AI_DEADLINE_MS`); ya **no** bloquea el
+    cacheo del resultado (se eliminan `aiPending`/`aiComplete`). Si la IA no
+    llega, la respuesta lleva `coverage.ai.ok=false` / `selection.aiOk=false`.
+  - **Nuevo `POST /api/ai/curate`** `{kind:"route"|"activities", route?, destination}`.
+    Mantiene un job por corredor/destino (`aiJobs` Map, clave por geometría) que
+    reintenta a Gemini con espera creciente (4·8·15·25·40·40 s, 6 intentos) y, si
+    agota sin éxito, un nuevo sondeo pasados 30 s arranca otro. Devuelve
+    `{status:"pending"|"ready"|"error"|"off", attempts, ranking, reasons, items}`.
+    `items` ya vienen `enrichInterest`-ados y con `aiInterest`/`aiReason`.
+    Jobs con TTL de 20 min.
+- **Cliente.**
+  - `stores.js`: `aiCuration = {route,activities: "idle"|"working"|"ready"|"error"}`.
+  - `scoring.js`: `applyAiToPool(pool,result)` — anota `aiInterest`/`aiReason` en
+    las opciones ya presentes por nombre (`normName`, exportada) y añade las
+    candidatas nuevas sin duplicar. No ordena (lo hace `applyPreferences`).
+  - `App.svelte`: `pollAiCuration(kind)` sondea `/api/ai/curate` con backoff
+    (3,5 s→15 s, hasta 5 min) hasta `ready`; entonces `mergeAiResult` fusiona en
+    el pool y, para ruta, recalcula métricas de desvío de las nuevas paradas.
+    `ensureAiCuration` lo arranca al terminar `retryCategory` de route/activities
+    salvo que la IA ya llegara en línea. `stopAiPolls` invalida sondeos al
+    cambiar de búsqueda/base (contador `aiPollSeq`). También al cargar un viaje.
+  - `loading.js`: `loadCategory` devuelve también `selection` (para leer `aiOk`).
+  - `OptionsPanel.svelte`: indicador `aiStatus(kind)` en los grupos «Paradas en
+    ruta» y «Actividades» — spinner + «Consultando a la IA…» mientras `working`,
+    «✦ Lista completada y ordenada por la IA» cuando `ready`.
+  - `routeStops:v28:`→`v29:`, `content:v10:`→`v11:`.
+- **Validación.** `npm test` 58/58 (nuevo caso de `applyAiToPool`); `node --check`;
+  `npm run build` limpio; prueba en vivo del sondeo (job aguanta los "high
+  demand" y entrega tras varios reintentos).
+
 ## v1.2.34 — El orden de las listas obedece a la nota de la IA y esa nota se ve
 
 - **Motivo.** v1.2.33 ordenaba las listas por la IA **en el servidor**, pero el
@@ -5212,13 +5253,16 @@ funciona igual con Wikipedia/Geoapify/OSM: la IA **suma**, no es un requisito.
   `OptionCard` pinta un badge «IA NN» con el motivo en el tooltip (v1.2.34).
 - **Guardarraíl (principio §2.4).** Nunca se usan coordenadas, horarios ni webs
   del LLM. Su salida sólo decide "qué nombres mostrar y en qué orden".
-- **Ruta crítica.** `AI_DEADLINE_MS = 12 s`. Si la IA lo supera (picos de "high
-  demand" de Gemini), la respuesta se sirve **sin** IA y **no se cachea como
-  final** (`aiPending` en `discoverRouteStops`, `aiComplete` en
-  `robustDestinationContent`): la llamada acaba en segundo plano y deja el
-  resultado en la caché interna de `aiCuratePlaces` (24 h), de modo que la
-  siguiente búsqueda del mismo corredor/destino ya la incorpora y entonces sí se
-  cachea (`routeStops:v27:`, `content:v9:`).
+- **Ruta crítica + segundo plano (v1.2.35).** Vía en línea con tope de `AI_DEADLINE_MS
+  = 6 s`; ya **no** condiciona el cacheo. Si la IA no llega a tiempo, la
+  respuesta lo indica (`coverage.ai.ok=false` / `selection.aiOk=false`) y el
+  **cliente sondea `POST /api/ai/curate`** hasta `status:"ready"`. El servidor
+  mantiene un job por corredor/destino que reintenta a Gemini con espera
+  creciente (6 intentos: 4·8·15·25·40·40 s; otro sondeo pasados 30 s reabre el
+  job). Al llegar, `scoring.js:applyAiToPool` fusiona en el pool (anota
+  `aiInterest`/`aiReason` por nombre + añade candidatas nuevas) y
+  `applyPreferences` reordena. Indicador en `OptionsPanel` (`aiCuration` store).
+  Cachés: `routeStops:v29:`, `content:v11:`.
 - **Puntos de integración.** `discoverRouteStops` (paradas en ruta) y
   `robustDestinationContent` con `kind==='activities'`. Comida/cena/alojamiento
   todavía **no** usan IA (mismo patrón si se quisiera: job de IA + `aiRanking` +

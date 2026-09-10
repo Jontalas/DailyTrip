@@ -62,6 +62,12 @@ export const api = {
     return post("/api/options/activities", { destination });
   },
 
+  // Curación por IA en segundo plano. Se sondea hasta status:"ready" (o "off"
+  // si no hay clave). Ver /api/ai/curate en server.js.
+  aiCurate({ kind, route, destination }) {
+    return post("/api/ai/curate", { kind, route, destination });
+  },
+
   optionsServices({ destination }) {
     return post("/api/options/services", { destination });
   },

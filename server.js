@@ -38,7 +38,7 @@ const OVERPASS_ENDPOINTS=[
 const GEOAPIFY_KEY=(process.env.GEOAPIFY_API_KEY||"").trim();
 const GOOGLE_KEY=(process.env.GOOGLE_PLACES_API_KEY||"").trim();
 const GEMINI_KEY=(process.env.GEMINI_API_KEY||"").trim();
-const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.34 (personal-use)";
+const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.35 (personal-use)";
 const DEBUG_EXTERNAL=process.env.DEBUG_EXTERNAL==="1";
 const debug=(...a)=>{if(DEBUG_EXTERNAL)console.warn(...a);};
 
@@ -1231,31 +1231,29 @@ async function localityProfile(destination) {
 const destinationRequests=new Map();
 async function robustDestinationContent(kind,destination){
   const profile=await localityProfile(destination);
-  const key=`content:v10:${kind}:${destination.lat}:${destination.lon}:${profile.tier}`;
+  const key=`content:v11:${kind}:${destination.lat}:${destination.lon}:${profile.tier}`;
   const fresh=cacheGet(key);
   if(fresh)return fresh.data;
   if(destinationRequests.has(key))return destinationRequests.get(key);
   const task=(async()=>{
     const radius=profile.radiusKm*1000,target=profile.targets[kind],all=[],errors=[],sources=[];
-    let aiRanking={},aiReasons={},aiComplete=true;
+    let aiRanking={},aiReasons={},aiOk=!GEMINI_KEY||kind!=='activities';
     const collect=async(name,job)=>{try{all.push(...await job());sources.push(name);}catch(e){errors.push(name);debug(name,e.message);}};
     const jobs=[];
-    // Curación por IA (sólo actividades). Aditiva: propone nombres, se geocodifican
-    // y validan contra el radio del destino; su nota ordena la lista. Con tope de
-    // espera: si la IA tarda o falla, se sigue sin ella y el resultado NO se
-    // cachea como final (la siguiente carga reintenta con la caché ya caliente).
-    // Ver §46.8.
+    // Curación por IA (sólo actividades). Aditiva y con tope de 6 s: si la IA
+    // tarda o falla, se sigue sin ella y el cliente la recupera en segundo plano
+    // vía `/api/ai/curate`. Ver §46.8.
     if(kind==='activities' && GEMINI_KEY) jobs.push((async()=>{
       try{
-        const cur=await Promise.race([
-          aiCuratePlaces({kind:'activities',area:destination.name,radiusKm:profile.radiusKm}),
+        const r=await Promise.race([
+          aiCurateAndGeocode({kind:'activities',destination}),
           new Promise((_,rej)=>setTimeout(()=>rej(new Error('ai-deadline')),AI_DEADLINE_MS))
         ]);
-        aiRanking=cur.ranking||{};aiReasons=cur.reasons||{};
-        if(cur.source==='error'){aiComplete=false;debug('ai',cur.error);return;}
-        if(cur.suggestions.length)all.push(...await aiPlaceCandidates(cur.suggestions,{near:destination,radiusKm:profile.radiusKm,cap:16}));
-        sources.push('ai');
-      }catch(e){aiComplete=false;debug('ai',e.message);}
+        aiRanking=r.ranking||{};aiReasons=r.reasons||{};
+        if(r.source!=='gemini'){debug('ai',r.error);return;}
+        all.push(...r.candidates);
+        aiOk=true;sources.push('ai');
+      }catch(e){debug('ai',e.message);}
     })());
     if(kind==='activities') jobs.push(collect('wikipedia',async()=>{
       const out=[],latSpan=profile.radiusKm/111,lonSpan=latSpan/Math.cos(destination.lat*Math.PI/180),detailCache=new Map();
@@ -1289,8 +1287,8 @@ async function robustDestinationContent(kind,destination){
       .map(x=>{const k=normName(x.name);return {...x,aiInterest:x.aiInterest ?? aiRanking[k] ?? null,aiReason:x.aiReason || aiReasons[k] || ""};});
     const items=topInterest(ranked,target,x=>aiRank(x,aiRanking));
     const result={status:errors.length?'partial':'ok',source:sources.join('+')||'none',items,
-      selection:{target,available:ranked.length,returned:items.length,profile,ranking:Object.keys(aiRanking).length?'ai+interest':'interest',complete:!errors.length,errors}};
-    if(!errors.length && aiComplete)cacheSet(key,result);
+      selection:{target,available:ranked.length,returned:items.length,profile,ranking:Object.keys(aiRanking).length?'ai+interest':'interest',aiOk,complete:!errors.length,errors}};
+    if(!errors.length)cacheSet(key,result);
     return result;
   })().finally(()=>destinationRequests.delete(key));
   destinationRequests.set(key,task);return task;
@@ -1413,7 +1411,7 @@ async function robustRouteStops(route,destination){
   const index=routeGeometryIndex(route.coords);
   const target=routeStopTarget(route.roadKm ?? index.total);
   const fingerprint=createHash("sha256").update(JSON.stringify({coords:route.coords,destination,target})).digest("hex").slice(0,24);
-  const key=`routeStops:v28:${fingerprint}`;
+  const key=`routeStops:v29:${fingerprint}`;
   const fresh=cacheGet(key);
   // Un resultado bajo el objetivo nunca evita una nueva búsqueda.
   if(fresh?.data?.coverage?.outcome==="target-reached" && fresh.data.items.length>=target)
@@ -1465,29 +1463,107 @@ async function aiPlaceCandidates(suggestions,{near=null,routeIndex=null,radiusKm
   return out;
 }
 
-// Tope de espera de la IA en la ruta crítica: si tarda más, se sigue sin ella
-// (la llamada acaba en segundo plano y deja el resultado en caché para la
-// siguiente búsqueda, que NO se cachea como final mientras la IA no haya
-// respondido — ver `aiPending` en discoverRouteStops).
-const AI_DEADLINE_MS=12000;
-// Sugerencias de la IA para el corredor de una ruta, ya geocodificadas y
-// filtradas al corredor. Aditivo y no bloqueante: si no hay clave, falla o
-// excede el tope, devuelve vacío y el descubrimiento sigue igual.
-async function aiRouteSuggestions(route,destination,index){
-  if(!GEMINI_KEY)return {candidates:[],ranking:{},meta:{ok:true,suggested:0}};
-  const origin=route.coords[0];
-  const run=(async()=>{
+// Tope de espera de la IA en la ruta crítica: si tarda más, la respuesta se
+// sirve SIN IA (ya se cachea igualmente) y el cliente sigue consultándola en
+// segundo plano vía `/api/ai/curate` hasta que responda.
+const AI_DEADLINE_MS=6000;
+
+// Curación por IA + geocodificación, compartida por la vía en línea (con tope)
+// y por el trabajo en segundo plano (sin tope, con reintentos). Devuelve
+// candidatas ya geocodificadas y validadas + los mapas nombre→nota/motivo.
+async function aiCurateAndGeocode({kind,route,destination,index}){
+  if(kind==="route"){
+    const origin=route.coords[0];
     const from=(await reverseGeocode(origin.lat,origin.lon).catch(()=>null))?.name||"";
     const cur=await aiCuratePlaces({kind:"route",from,to:destination.name,roadKm:Math.round(route.roadKm||index.total)});
-    if(cur.source==="error")return {candidates:[],ranking:{},reasons:{},meta:{ok:false,error:cur.error}};
+    if(cur.source!=="gemini")return {source:cur.source,error:cur.error,candidates:[],ranking:cur.ranking||{},reasons:cur.reasons||{},suggested:0};
     const candidates=cur.suggestions.length
       ? await aiPlaceCandidates(cur.suggestions,{routeIndex:index,radiusKm:12,cap:16,endpoints:[origin,destination]})
       : [];
-    return {candidates,ranking:cur.ranking,reasons:cur.reasons||{},meta:{ok:true,suggested:cur.suggestions.length,added:candidates.length}};
-  })().catch(e=>({candidates:[],ranking:{},reasons:{},meta:{ok:false,error:e?.message||String(e)}}));
+    return {source:"gemini",candidates,ranking:cur.ranking,reasons:cur.reasons||{},suggested:cur.suggestions.length};
+  }
+  const profile=await localityProfile(destination);
+  const cur=await aiCuratePlaces({kind:"activities",area:destination.name,radiusKm:profile.radiusKm});
+  if(cur.source!=="gemini")return {source:cur.source,error:cur.error,candidates:[],ranking:cur.ranking||{},reasons:cur.reasons||{},suggested:0};
+  const candidates=cur.suggestions.length
+    ? await aiPlaceCandidates(cur.suggestions,{near:destination,radiusKm:profile.radiusKm,cap:16})
+    : [];
+  return {source:"gemini",candidates,ranking:cur.ranking,reasons:cur.reasons||{},suggested:cur.suggestions.length};
+}
+
+// Vía EN LÍNEA para `discoverRouteStops`: mejor esfuerzo con tope de 6 s. Si la
+// IA está lenta, devuelve vacío; el cliente la recupera con `/api/ai/curate`.
+async function aiRouteSuggestions(route,destination,index){
+  if(!GEMINI_KEY)return {candidates:[],ranking:{},reasons:{},meta:{ok:true,suggested:0}};
+  const run=aiCurateAndGeocode({kind:"route",route,destination,index})
+    .then(r=>({candidates:r.candidates,ranking:r.ranking,reasons:r.reasons,meta:{ok:r.source==="gemini",suggested:r.suggested,added:r.candidates.length,error:r.error}}))
+    .catch(e=>({candidates:[],ranking:{},reasons:{},meta:{ok:false,error:e?.message||String(e)}}));
   const deadline=new Promise(r=>setTimeout(()=>r({candidates:[],ranking:{},reasons:{},meta:{ok:false,timedOut:true}}),AI_DEADLINE_MS));
   return Promise.race([run,deadline]);
 }
+
+// ---- Trabajo de curación por IA EN SEGUNDO PLANO -----------------------------
+// El cliente lo consulta tras cargar las opciones; el servidor mantiene un job
+// por corredor/destino que reintenta a Gemini con espera creciente hasta que
+// responde. `/api/ai/curate` devuelve {status:'pending'|'ready'|'error'|'off'}.
+const aiJobs=new Map(); // key -> {status,attempts,startedAt,result,lastError}
+const AI_JOB_ATTEMPTS=6;
+const AI_JOB_BACKOFF=[4000,8000,15000,25000,40000,40000];
+const AI_JOB_TTL=20*60*1000;
+const AI_JOB_RETRY_AFTER=30000;
+
+function aiJobKey(kind,route,destination){
+  const seed=kind==="route"
+    ? JSON.stringify({k:"route",c:(route?.coords||[]).filter((_,i)=>i%20===0),km:Math.round(route?.roadKm||0),d:[destination.lat,destination.lon]})
+    : JSON.stringify({k:"act",d:[destination.lat,destination.lon]});
+  return `aijob:${kind}:${createHash("sha256").update(seed).digest("hex").slice(0,20)}`;
+}
+
+async function runAiJob(job,input){
+  for(let attempt=0;attempt<AI_JOB_ATTEMPTS;attempt++){
+    job.attempts=attempt+1;
+    try{
+      const r=await aiCurateAndGeocode(input);
+      if(r.source==="gemini"){
+        const dn=input.destination.name;
+        const enriched=enrichInterest(r.candidates,dn).map(x=>{
+          const k=normName(x.name);
+          return {...x,aiInterest:x.aiInterest ?? r.ranking[k] ?? null,aiReason:x.aiReason || r.reasons[k] || ""};
+        });
+        job.result={ranking:r.ranking,reasons:r.reasons,items:enriched,suggested:r.suggested,added:enriched.length};
+        job.status="ready";
+        return;
+      }
+      job.lastError=r.error||"sin respuesta de la IA";
+    }catch(e){ job.lastError=e?.message||String(e); }
+    if(attempt<AI_JOB_ATTEMPTS-1)await sleep(AI_JOB_BACKOFF[attempt]);
+  }
+  job.status=job.result?"ready":"error";
+}
+
+app.post("/api/ai/curate",async(req,res)=>{
+  try{
+    const {kind,route,destination}=req.body||{};
+    if(!["route","activities"].includes(kind)||!destination||!Number.isFinite(destination.lat))
+      return res.status(400).json({status:"error",error:"Parámetros inválidos."});
+    if(!GEMINI_KEY)return res.json({status:"off"});
+    let index=null;
+    if(kind==="route"){
+      if(!Array.isArray(route?.coords)||route.coords.length<2)return res.status(400).json({status:"error",error:"Ruta inválida."});
+      index=routeGeometryIndex(route.coords);
+    }
+    const key=aiJobKey(kind,route,destination);
+    let job=aiJobs.get(key);
+    if(!job || (job.status==="error" && Date.now()-job.startedAt>AI_JOB_RETRY_AFTER)){
+      job={status:"pending",attempts:0,startedAt:Date.now(),result:null,lastError:""};
+      aiJobs.set(key,job);
+      runAiJob(job,{kind,route,destination,index}).catch(e=>{job.status="error";job.lastError=e?.message||String(e);});
+      setTimeout(()=>aiJobs.delete(key),AI_JOB_TTL).unref?.();
+    }
+    if(job.status==="ready")return res.json({status:"ready",attempts:job.attempts,...job.result});
+    return res.json({status:job.status,attempts:job.attempts,lastError:job.lastError||undefined});
+  }catch(e){ res.status(502).json({status:"error",error:e?.message||"No se pudo consultar la IA."}); }
+});
 
 async function discoverRouteStops(route,destination,index,target,key){
   const origin=route.coords[0];
@@ -1580,11 +1656,9 @@ async function discoverRouteStops(route,destination,index,target,key){
   let items=[...primary,...landmarks].sort((a,b)=>rankScore(b)-rankScore(a) || (b.interestScore||0)-(a.interestScore||0));
   const coverage={...found.coverage,returned:items.length,landmarks:landmarks.length,centers:index.centers.length,rejected,providers:providers.map(p=>p.name),ai:ai.meta};
   const result={status:coverage.outcome==="incomplete"?"partial":"ok",items,coverage,source:[...new Set(items.map(x=>x.source))].join("+")||"none"};
-  // No se congela el resultado como final mientras la IA (configurada) no haya
-  // respondido: así la próxima búsqueda del corredor reintenta y recoge su
-  // aportación (que ya quedó en la caché interna de aiCuratePlaces).
-  const aiPending=GEMINI_KEY && ai.meta && ai.meta.ok===false;
-  if(coverage.outcome==="target-reached" && !aiPending)cacheSet(key,result);
+  // Se cachea aunque la IA no haya llegado a tiempo: el cliente la recupera en
+  // segundo plano vía `/api/ai/curate` y fusiona/reordena la lista al vuelo.
+  if(coverage.outcome==="target-reached")cacheSet(key,result);
   if(!items.length && coverage.outcome==="incomplete"){
     const stale=cacheGet(key,{allowStale:true});
     if(stale?.data?.items?.length)return {...result,items:stale.data.items,source:"cache-stale"};
@@ -1986,4 +2060,4 @@ app.post("/api/plan/route-via",async(req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Travel Planner 1.2.34 en http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`Travel Planner 1.2.35 en http://localhost:${PORT}`));

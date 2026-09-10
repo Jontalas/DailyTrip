@@ -43,6 +43,7 @@
     geoapify: "Geoapify",
     google: "Google Places",
     osm: "OpenStreetMap",
+    ai: "sugerido por la IA (ubicación verificada)",
     cache: "caché reciente",
     "cache-stale": "caché antigua",
     generated: "generado por la app (sin lugar concreto)"
@@ -530,6 +531,9 @@
   }
   .src--osm {
     background: #7ebc6f;
+  }
+  .src--ai {
+    background: var(--accent);
   }
   .src--gen {
     background: var(--line-strong);

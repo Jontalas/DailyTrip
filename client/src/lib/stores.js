@@ -70,6 +70,11 @@ export const mobileTask = writable(null);
    lista (abrir su grupo + hacer scroll hasta ella). Se limpia tras revelarla. */
 export const revealOptionId = writable(null);
 
+/* Estado de la consulta a la IA en segundo plano por sección:
+   "idle" | "working" | "ready" | "error". Mientras es "working" se muestra un
+   indicador; al pasar a "ready" la lista ya se ha fusionado y reordenado. */
+export const aiCuration = writable({ route: "idle", activities: "idle" });
+
 /* Paradas personalizadas añadidas por el usuario (búsqueda por nombre o pin en
    el mapa). Van SIEMPRE seleccionadas. Borrarlas no deja rastro. */
 export const customStops = writable([]);

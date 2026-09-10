@@ -7,7 +7,7 @@ import {get} from 'svelte/store';
 import {pools,selected as selectionStore,emptySelected,emptyPools,openOptionGroup,groupOfOptionId,selectFoodFromMap} from '../client/src/lib/stores.js';
 import {matchesPlace,placeContent} from '../lib/place-content.js';
 import {destinationScale,topInterest,latestPopulation} from '../lib/destination-options.js';
-import {applyPreferences} from '../client/src/lib/scoring.js';
+import {applyPreferences,applyAiToPool,normName} from '../client/src/lib/scoring.js';
 import {loadCategory} from '../client/src/lib/loading.js';
 import {searchTolerance,nearbyBaseRoutes} from '../lib/base-search.js';
 import {routeStopTarget} from '../lib/route-search.js';
@@ -245,6 +245,32 @@ test('recorte conserva interés máximo y preferencias no ordenan por desvío',(
   const result=applyPreferences({route:items},[]).route;
   assert.equal(result[0].interestScore,99);
   assert.ok(Math.min(...topInterest(items,20).map(x=>x.interestScore))>=Math.max(...items.filter(x=>!topInterest(items,20).includes(x)).map(x=>x.interestScore)));
+});
+
+test('applyAiToPool anota la nota/motivo de la IA y añade candidatas nuevas, sin duplicar',()=>{
+  const pool=[
+    {id:'w1',name:'Alcazaba de Almería',interestScore:60},
+    {id:'g1',name:'Playa de San José',interestScore:40},
+    {id:'a0',name:'Balcón de Europa',interestScore:30,aiInterest:88} // ya trae nota: no se toca
+  ];
+  const result={
+    status:'ready',
+    ranking:{[normName('Alcazaba de Almería')]:95,[normName('Balcón de Europa')]:70,[normName('Cueva de Nerja')]:92},
+    reasons:{[normName('Alcazaba de Almería')]:'Fortaleza andalusí imponente.'},
+    items:[
+      {id:'ai:cueva de nerja',name:'Cueva de Nerja',interestScore:55,aiInterest:92,aiReason:'Gran cueva.'},
+      {id:'ai:balcon',name:'Balcón de Europa',interestScore:50,aiInterest:70} // duplica por nombre: no se añade
+    ]
+  };
+  const out=applyAiToPool(pool,result);
+  assert.equal(out.length,4); // 3 + 1 (la Cueva); el Balcón duplicado no entra
+  assert.equal(out.find(x=>x.id==='w1').aiInterest,95);
+  assert.equal(out.find(x=>x.id==='w1').aiReason,'Fortaleza andalusí imponente.');
+  assert.equal(out.find(x=>x.id==='a0').aiInterest,88); // intacto
+  assert.ok(out.some(x=>x.id==='ai:cueva de nerja'));
+  // pendiente/off: no cambia nada
+  assert.equal(applyAiToPool(pool,{status:'pending'}),pool);
+  assert.deepEqual(applyAiToPool(pool,null).map(x=>x.id),['w1','g1','a0']);
 });
 
 test('applyPreferences ordena por la nota de la IA cuando existe, sin ocultar lo que no puntúa',()=>{
