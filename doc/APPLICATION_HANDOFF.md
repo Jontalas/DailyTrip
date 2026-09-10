@@ -2420,6 +2420,24 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.39 — Exportar la ruta del día a Google Maps
+
+- **Qué.** Enlace «Abrir en Google Maps ↗» en `ItineraryPanel` (junto a
+  «Descargar itinerario» / «Guardar viaje»). Abre Google Maps con la ruta en
+  coche **origen → paradas del día → base final**, en el orden del itinerario, y
+  desde ahí se puede iniciar la navegación.
+- **Qué incluye.** TODO lo seleccionado: paradas en ruta, comida, cena,
+  alojamiento y actividades en destino (`itin.events` sin los tramos `travel`;
+  si el día aún no está calculado, cae a `$selected.*` ordenado por
+  `routeProgressPct`).
+- **Cómo.** `mapsExport` (`$derived.by` en `App.svelte`) construye una URL de la
+  Maps URLs API: `https://www.google.com/maps/dir/?api=1&travelmode=driving`
+  `&origin=lat,lng&destination=lat,lng&waypoints=lat,lng|lat,lng|…`. Deduplica por
+  coordenada (5 decimales) y excluye la base de los waypoints. Google Maps admite
+  **9 paradas intermedias**: si hay más se envían las 9 primeras y se avisa
+  (`mapsExport.truncated` → nota bajo los botones).
+- **Validación.** `npm test` 60/60; `node --check`; `npm run build` limpio.
+
 ## v1.2.38 — El itinerario no tapa la leyenda; leyenda horizontal por columnas
 
 - **Motivo.** El rail derecho reservaba `padding-bottom: 210px` fijo para la

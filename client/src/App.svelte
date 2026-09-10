@@ -664,6 +664,43 @@
     itin=result;
   });
 
+  /* ---- Exportar la ruta del día a Google Maps ---------------------------
+     origen → paradas del día (en el orden del itinerario) → base final.
+     Google Maps admite 9 paradas intermedias; si hay más se avisa. */
+  const GMAPS_MAX_WAYPOINTS = 9;
+  let mapsExport = $derived.by(() => {
+    const origin = $searchContext?.origin, base = $chosen;
+    if (!origin || !base || !Number.isFinite(origin.lat) || !Number.isFinite(base.lat)) return null;
+    const seen = new Set();
+    const key = (p) => `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`;
+    const stops = [];
+    const add = (p) => {
+      if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return;
+      const k = key(p);
+      if (k === key(base) || seen.has(k)) return;
+      seen.add(k); stops.push(p);
+    };
+    const evs = (itin?.events || []).filter((e) => e.item && e.kind !== "travel");
+    if (evs.length) evs.forEach((e) => add(e.item));
+    else {
+      [...$selected.route].sort((a, b) => (a.routeProgressPct ?? 50) - (b.routeProgressPct ?? 50)).forEach(add);
+      if ($selected.lunch) add($selected.lunch);
+      if ($selected.hotel) add($selected.hotel);
+      $selected.activities.forEach(add);
+      if ($selected.dinner) add($selected.dinner);
+    }
+    if (!stops.length && !base) return null;
+    const shown = stops.slice(0, GMAPS_MAX_WAYPOINTS);
+    const ll = (p) => `${p.lat},${p.lon}`;
+    const u = new URL("https://www.google.com/maps/dir/");
+    u.searchParams.set("api", "1");
+    u.searchParams.set("travelmode", "driving");
+    u.searchParams.set("origin", ll(origin));
+    u.searchParams.set("destination", ll(base));
+    if (shown.length) u.searchParams.set("waypoints", shown.map(ll).join("|"));
+    return { url: u.toString(), count: shown.length, truncated: stops.length > shown.length, total: stops.length };
+  });
+
 </script>
 
 {#snippet planContent()}
@@ -734,7 +771,7 @@
 
 {#snippet itinContent()}
   <div class="card card--fill">
-    <ItineraryPanel onretry={() => dayRetry++} onsave={saveTrip} result={itin} {hasPlan} />
+    <ItineraryPanel onretry={() => dayRetry++} onsave={saveTrip} {mapsExport} result={itin} {hasPlan} />
   </div>
 {/snippet}
 
@@ -767,7 +804,7 @@
     <label class="m-time"><span>Hora de salida</span><input type="time" bind:value={$departureTime} /></label>
     <PreferencesBar />
   {:else if task === "itin"}
-    <ItineraryPanel onretry={() => dayRetry++} onsave={saveTrip} result={itin} {hasPlan} />
+    <ItineraryPanel onretry={() => dayRetry++} onsave={saveTrip} {mapsExport} result={itin} {hasPlan} />
   {:else}
     <OptionsPanel
       mobile
@@ -800,7 +837,7 @@
   <header class="brand">
     <div class="brand__mark">
       <span class="dot"></span>
-      Travel Planner <small>v1.2.38</small>
+      Travel Planner <small>v1.2.39</small>
     </div>
     {#if !narrow && hasPlan}
       <button

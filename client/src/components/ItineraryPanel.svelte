@@ -5,7 +5,7 @@
   import { fromMin } from "../lib/format.js";
   import { dur } from "../lib/motion.js";
 
-  let { result = { events: [], endTime: 0, warnings: [] }, hasPlan = false, onretry, onsave } = $props();
+  let { result = { events: [], endTime: 0, warnings: [] }, hasPlan = false, onretry, onsave, mapsExport = null } = $props();
 
   function downloadPlan() {
     const lines=['Itinerario del día',...result.events.map(e=>`${fromMin(e.time)} · ${e.label}: ${e.name}${e.phase==='travel' ? ` (${e.durationMin} min${e.journeyDurationMin!=null?`; ${e.journeyDurationMin} min de conducción en total, pausa aparte`:''})` : e.mins ? ` (${e.mins} min)` : ''}`),'',...(result.warnings || [])];
@@ -41,7 +41,13 @@
           {#if !result.routingBusy && (result.routingError || result.routingEstimated)}<button type="button" onclick={onretry}>Reintentar ruta</button>{/if}
           <button type="button" onclick={downloadPlan}>Descargar itinerario</button>
           {#if onsave}<button type="button" onclick={onsave}>Guardar viaje</button>{/if}
+          {#if mapsExport?.url}
+            <a class="gmaps" href={mapsExport.url} target="_blank" rel="noopener">Abrir en Google Maps ↗</a>
+          {/if}
         </div>
+        {#if mapsExport?.truncated}
+          <small class="gmaps-note">Google Maps admite 9 paradas intermedias: se han incluido las 9 primeras del itinerario (de {mapsExport.total}).</small>
+        {/if}
       </div>
     {/if}
     {#if !hasPlan}
@@ -73,8 +79,11 @@
 <style>
   .route-summary {padding:10px; margin-bottom:12px; background:var(--surface-sunk);border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px;}
   .route-summary small {display:block;color:var(--text-faint);margin-top:4px;line-height:1.5;}
-  .route-actions {display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;}
-  .route-actions button {font-size:11px;color:var(--accent);text-decoration:underline;}
+  .route-actions {display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;align-items:center;}
+  .route-actions button,
+  .route-actions .gmaps {font-size:11px;color:var(--accent);text-decoration:underline;}
+  .route-actions .gmaps {font-weight:700;}
+  .gmaps-note {display:block;margin-top:6px;color:var(--text-faint);line-height:1.5;}
   .itin {
     display: flex;
     flex-direction: column;
