@@ -38,7 +38,7 @@ const OVERPASS_ENDPOINTS=[
 const GEOAPIFY_KEY=(process.env.GEOAPIFY_API_KEY||"").trim();
 const GOOGLE_KEY=(process.env.GOOGLE_PLACES_API_KEY||"").trim();
 const GEMINI_KEY=(process.env.GEMINI_API_KEY||"").trim();
-const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.36 (personal-use)";
+const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.37 (personal-use)";
 const DEBUG_EXTERNAL=process.env.DEBUG_EXTERNAL==="1";
 const debug=(...a)=>{if(DEBUG_EXTERNAL)console.warn(...a);};
 
@@ -1699,6 +1699,10 @@ app.post("/api/search/candidates",async(req,res)=>{
     try{tol=searchTolerance(toleranceKm);}catch(e){return res.status(400).json({error:e.message});}
     const discovered=await discoverBaseCandidates(target,tol);
     const candidates=discovered.items;
+    // El destino orientativo SIEMPRE debe poder elegirse como final de etapa.
+    const targetId=target.id || `target:${target.lat}:${target.lon}`;
+    const targetCand=candidates.find(c=>c.id===targetId) || {...target,id:targetId};
+    const isTargetBase=x=>x.id===targetId || (norm(x.name)===norm(target.name) && haversineKm(x,target)<2);
     // Refine coordinates BEFORE measuring the tolerance and the trip distance.
     for(let i=0;i<candidates.length;i+=4)await Promise.all(candidates.slice(i,i+4).map(async b=>{
       if(b.lat===target.lat && b.lon===target.lon)return;
@@ -1707,6 +1711,17 @@ app.post("/api/search/candidates",async(req,res)=>{
     }));
     const nearby=candidates.filter(x=>haversineKm(x,target)<=tol+0.001);
     let valid=await nearbyBaseRoutes(origin,target,nearby,tol,routeTable);
+    // Si el filtro por carretera dejó fuera el propio destino orientativo (fallo
+    // puntual de OSRM, etc.), se reincorpora con sus métricas desde el origen.
+    if(!valid.some(isTargetBase)){
+      let roadKm=null,durationMin=null;
+      try{
+        const [m]=await routeTable(origin,[targetCand]);
+        if(Number.isFinite(m?.roadKm))roadKm=Math.round(m.roadKm);
+        if(Number.isFinite(m?.durationMin))durationMin=Math.round(m.durationMin);
+      }catch{}
+      valid.push({...targetCand,roadKm,durationMin,distanceToTargetKm:0});
+    }
     if(!valid.length)return res.status(422).json({error:`No se encontraron localidades accesibles a un máximo de ${tol} km por carretera de ${target.name}.`});
 
     // 3. Evaluar el interés REAL de cada base.
@@ -1730,15 +1745,21 @@ app.post("/api/search/candidates",async(req,res)=>{
     });
 
     // 4. Orden EXCLUSIVAMENTE por interés de base.
-    valid.sort((a,b)=>{
+    const byBaseInterest=(a,b)=>{
       if(a.baseInterest!=null&&b.baseInterest!=null)return b.baseInterest-a.baseInterest;
       if(a.baseInterest!=null)return-1;
       if(b.baseInterest!=null)return 1;
       return 0;
-    });
+    };
+    valid.sort(byBaseInterest);
+
+    // El destino orientativo va SIEMPRE en la lista, en su lugar por puntuación.
+    let results=valid.slice(0,8);
+    const targetEntry=valid.find(isTargetBase);
+    if(targetEntry && !results.includes(targetEntry)) results=[...results,targetEntry].sort(byBaseInterest);
 
     res.json({
-      results:valid.slice(0,8),
+      results,
       target,toleranceKm:tol,discoveryComplete:!discovered.errors.length,
       disclaimer:`Destinos a un máximo de ${tol} km por carretera de ${target.name}, ordenados por interés. Los kilómetros de cada tarjeta corresponden al viaje desde ${origin.name}.${discovered.errors.length?' La búsqueda de localidades está incompleta por un fallo del proveedor.':''}`
     });
@@ -2060,4 +2081,4 @@ app.post("/api/plan/route-via",async(req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Travel Planner 1.2.36 en http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`Travel Planner 1.2.37 en http://localhost:${PORT}`));

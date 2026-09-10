@@ -2420,6 +2420,27 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.37 — Sin opciones repetidas; el destino orientativo siempre es un final de etapa
+
+- **1) Nada de entradas repetidas en las listas.** `scoring.js:dedupePool(list)`
+  colapsa opciones que son el mismo lugar: nombre normalizado igual (o una
+  contiene a la otra, o ≥75 % de palabras comunes) **y** cercanía (< 1 km; < 150 m
+  para el solape parcial). Dos lugares homónimos en municipios distintos NO se
+  funden. Conserva la primera (más interés) y le rellena los campos que falten
+  (incluida la nota/motivo de la IA). Se aplica en `applyPreferences` a **todos**
+  los pools (ruta, actividades, comida, alojamiento…), que es el paso por el que
+  pasan las listas antes de pintarse, así que atrapa duplicados vengan de donde
+  vengan (Wikipedia/Geoapify/OSM/IA en línea o de fondo).
+- **2) El destino orientativo, siempre elegible como final de etapa.**
+  `/api/search/candidates`: si el filtro por carretera dejó fuera el propio
+  destino escrito por el usuario (fallo puntual de OSRM…), se reincorpora con sus
+  métricas desde el origen; y tras ordenar por interés, si no entró en el top 8
+  se **añade igualmente**, en su posición por puntuación (`isTargetBase`,
+  `byBaseInterest`). Su nota se calcula con `quickBaseSummary` como la de
+  cualquier base.
+- **Validación.** `npm test` 60/60 (nuevos casos de `dedupePool` y de
+  `applyPreferences` sin repetidos); `node --check`; `npm run build` limpio.
+
 ## v1.2.36 — Indicador de consulta a la IA visible sin abrir la sección
 
 - **Motivo.** El aviso de v1.2.35 sólo se veía dentro de la hoja/grupo abierto.

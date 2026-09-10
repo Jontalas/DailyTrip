@@ -7,7 +7,7 @@ import {get} from 'svelte/store';
 import {pools,selected as selectionStore,emptySelected,emptyPools,openOptionGroup,groupOfOptionId,selectFoodFromMap} from '../client/src/lib/stores.js';
 import {matchesPlace,placeContent} from '../lib/place-content.js';
 import {destinationScale,topInterest,latestPopulation} from '../lib/destination-options.js';
-import {applyPreferences,applyAiToPool,normName} from '../client/src/lib/scoring.js';
+import {applyPreferences,applyAiToPool,dedupePool,normName} from '../client/src/lib/scoring.js';
 import {loadCategory} from '../client/src/lib/loading.js';
 import {searchTolerance,nearbyBaseRoutes} from '../lib/base-search.js';
 import {routeStopTarget} from '../lib/route-search.js';
@@ -245,6 +245,32 @@ test('recorte conserva interés máximo y preferencias no ordenan por desvío',(
   const result=applyPreferences({route:items},[]).route;
   assert.equal(result[0].interestScore,99);
   assert.ok(Math.min(...topInterest(items,20).map(x=>x.interestScore))>=Math.max(...items.filter(x=>!topInterest(items,20).includes(x)).map(x=>x.interestScore)));
+});
+
+test('dedupePool colapsa repetidas por nombre/proximidad y no fusiona homónimos lejanos',()=>{
+  const list=[
+    {id:'g1',name:'Balcón de Europa',lat:36.745,lon:-3.874,interestScore:55},
+    {id:'ai1',name:'El Balcón de Europa',lat:36.7451,lon:-3.8741,interestScore:40,aiInterest:90,aiReason:'Mirador icónico.'},
+    {id:'w1',name:'Iglesia de San Juan',lat:37.766,lon:-3.790,interestScore:50},
+    {id:'w2',name:'Iglesia de San Juan',lat:40.416,lon:-3.703,interestScore:48}, // otra ciudad
+    {id:'w3',name:'Cueva de Nerja',lat:36.761,lon:-3.845,interestScore:60}
+  ];
+  const out=dedupePool(list.map(x=>({...x})));
+  assert.equal(out.length,4); // se funden los dos "Balcón de Europa"
+  const bal=out.find(x=>x.id==='g1');
+  assert.equal(bal.aiInterest,90);          // la nota de la IA se conserva
+  assert.equal(bal.aiReason,'Mirador icónico.');
+  assert.ok(out.some(x=>x.id==='w1') && out.some(x=>x.id==='w2')); // homónimos lejanos, ambos
+});
+
+test('applyPreferences elimina entradas repetidas del pool',()=>{
+  const pool=[
+    {id:'a',name:'Alcazaba',lat:36.84,lon:-2.46,interestScore:70},
+    {id:'b',name:'La Alcazaba',lat:36.8401,lon:-2.4601,interestScore:30}
+  ];
+  const out=applyPreferences({activities:pool},[]).activities;
+  assert.equal(out.length,1);
+  assert.equal(out[0].id,'a');
 });
 
 test('applyAiToPool anota la nota/motivo de la IA y añade candidatas nuevas, sin duplicar',()=>{

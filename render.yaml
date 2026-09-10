@@ -27,7 +27,7 @@ services:
       - key: GEMINI_MODEL
         value: "gemini-flash-lite-latest"
       - key: APP_USER_AGENT
-        value: "TravelPlannerPersonal/1.2.36 (personal-use)"
+        value: "TravelPlannerPersonal/1.2.37 (personal-use)"
       - key: NOMINATIM_URL
         value: "https://nominatim.openstreetmap.org"
       - key: OSRM_URL

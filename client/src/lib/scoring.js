@@ -59,6 +59,53 @@ export function normName(s) {
     .trim();
 }
 
+function haversineKm(a, b) {
+  const R = 6371, rad = (d) => (d * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/* Colapsa opciones repetidas dentro de un pool. Dos entradas son la misma si su
+   nombre normalizado coincide (o una contiene a la otra, o comparten la mayoría
+   de palabras) Y están cerca (< 1 km; < 150 m para el solape parcial). Dos
+   lugares con el mismo nombre en municipios distintos NO se fusionan.
+   Conserva la primera (más interés) y le rellena los datos que le falten. */
+export function dedupePool(list) {
+  const out = [];
+  for (const item of list) {
+    if (!item || !item.name) { if (item) out.push(item); continue; }
+    const k = normName(item.name);
+    const dup = out.find((x) => {
+      const xk = normName(x.name);
+      if (!k || !xk) return false;
+      const coordsClose =
+        !Number.isFinite(item.lat) || !Number.isFinite(x.lat) || haversineKm(item, x) < 1;
+      if (k === xk) return coordsClose;
+      if (k.length > 4 && xk.length > 4 && (k.includes(xk) || xk.includes(k))) return coordsClose;
+      const wa = k.split(" ").filter((w) => w.length > 2);
+      const wb = new Set(xk.split(" ").filter((w) => w.length > 2));
+      if (wa.length && wb.size) {
+        const inter = wa.filter((w) => wb.has(w)).length;
+        if (
+          inter / Math.min(wa.length, wb.size) >= 0.75 &&
+          Number.isFinite(item.lat) && Number.isFinite(x.lat) && haversineKm(item, x) < 0.15
+        )
+          return true;
+      }
+      return false;
+    });
+    if (!dup) { out.push(item); continue; }
+    if (dup.aiInterest == null && item.aiInterest != null) dup.aiInterest = item.aiInterest;
+    if (!dup.aiReason && item.aiReason) dup.aiReason = item.aiReason;
+    if ((item.interestScore || 0) > (dup.interestScore || 0)) dup.interestScore = item.interestScore;
+    for (const f of ["description", "imageUrl", "wikipediaUrl", "website", "openingHours", "rating", "userRatingCount", "shortDesc"])
+      if (dup[f] == null || dup[f] === "") dup[f] = item[f];
+    if (item.categories) dup.categories = [...new Set([...(dup.categories || []), ...item.categories])];
+  }
+  return out;
+}
+
 /* Fusiona en un pool el resultado de `/api/ai/curate` (segundo plano):
    1) anota `aiInterest`/`aiReason` en las opciones ya presentes cuyo nombre
       casa con el ranking de la IA;
@@ -97,7 +144,8 @@ export function adjustedStageValue(item, prefs) {
 export function applyPreferences(pools, prefs) {
   const out = {};
   for (const k of Object.keys(pools)) {
-    out[k] = [...(pools[k] || [])]
+    // Copias frescas -> `dedupePool` puede rellenar campos sin tocar el store.
+    out[k] = dedupePool((pools[k] || []).map((x) => ({ ...x })))
       .map((x) => ({
         ...x,
         adjustedInterest: adjustedInterest(x, prefs),
