@@ -39,7 +39,7 @@ const OVERPASS_ENDPOINTS=[
 const GEOAPIFY_KEY=(process.env.GEOAPIFY_API_KEY||"").trim();
 const GOOGLE_KEY=(process.env.GOOGLE_PLACES_API_KEY||"").trim();
 const GEMINI_KEY=(process.env.GEMINI_API_KEY||"").trim();
-const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.42 (personal-use)";
+const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.43 (personal-use)";
 const DEBUG_EXTERNAL=process.env.DEBUG_EXTERNAL==="1";
 const debug=(...a)=>{if(DEBUG_EXTERNAL)console.warn(...a);};
 
@@ -156,6 +156,44 @@ async function nominatimSearch(q,{limit=6,viewbox=null}={}){
   return Array.isArray(d)?d:[];
 }
 
+// Geocodificador de Geoapify (cuando hay clave). Su motor difuso encuentra
+// nombres de marca / comerciales que OSM no tiene con ese nombre (p. ej.
+// "Sercotel Avenida Almería" -> el hotel real, aunque en OSM se llame de otra
+// forma). Se normaliza a la forma de Nominatim para reutilizar `pickPlaceResult`.
+function geoapifyToNominatim(f){
+  const p=f.properties||{};
+  const rt=p.result_type||"";
+  const catLast=String((p.categories||[])[0]||"").split(".").pop();
+  const cls=rt==="amenity"?"amenity"
+    :rt==="building"?"building"
+    :rt==="street"?"highway"
+    :["city","postcode","district","county","state","suburb","village","town"].includes(rt)?"place"
+    :"";
+  return {
+    name:p.name||p.address_line1||"",
+    class:cls,
+    type:rt==="amenity"?(catLast||rt):rt,
+    addresstype:rt,
+    importance:Number(p.rank?.importance ?? p.rank?.confidence ?? 0.3),
+    lat:p.lat,lon:p.lon,
+    address:p.housenumber?{house_number:String(p.housenumber)}:{},
+    display_name:p.formatted||p.name||""
+  };
+}
+async function geoapifyGeocode(q,center){
+  if(!GEOAPIFY_KEY)return [];
+  const u=new URL("https://api.geoapify.com/v1/geocode/search");
+  u.searchParams.set("text",q);
+  u.searchParams.set("lang","es");
+  u.searchParams.set("limit","8");
+  if(center)u.searchParams.set("bias",`proximity:${center.lon},${center.lat}`);
+  u.searchParams.set("apiKey",GEOAPIFY_KEY);
+  try{
+    const d=await fetchJson(u,{},9000);
+    return (d.features||[]).map(geoapifyToNominatim).filter(x=>Number.isFinite(Number(x.lat)));
+  }catch(e){debug("geoapify geocode:",e.message);return [];}
+}
+
 async function geocode(q,{place=false,near=null}={}){
   // `near`: {lat,lon} o una caja {minLat,minLon,maxLat,maxLon} para sesgar la
   // búsqueda hacia el área del viaje (no la restringe).
@@ -179,6 +217,21 @@ async function geocode(q,{place=false,near=null}={}){
       const d2=await nominatimSearch(stripped,{limit:12,viewbox});
       const second=d2.length?pickPlaceResult(d2,stripped,center):null;
       if(second && (second.nameHit || !first || second.bestScore>first.bestScore)){d=d2;q=stripped;}
+    }
+  }
+
+  // Respaldo con Geoapify para nombres de marca / comerciales que OSM no indexa
+  // con ese nombre. Sólo si Nominatim no dio ya un POI claro con el nombre.
+  if(place && GEOAPIFY_KEY){
+    const cur=d.length?pickPlaceResult(d,q,center):null;
+    if(!cur || !cur.nameHit || cur.bestScore<120){
+      const gq=String(q).replace(NAME_PREFIX,"").trim()||String(q).trim();
+      const g=await geoapifyGeocode(gq,center);
+      if(g.length){
+        const combined=[...d,...g];
+        const best=pickPlaceResult(combined,gq,center);
+        if(best.bestScore>(cur?cur.bestScore:-Infinity)){d=combined;q=gq;}
+      }
     }
   }
   if(!d.length)throw new Error(`No encuentro "${q}".`);
@@ -2109,4 +2162,4 @@ app.post("/api/plan/route-via",async(req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Travel Planner 1.2.42 en http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`Travel Planner 1.2.43 en http://localhost:${PORT}`));

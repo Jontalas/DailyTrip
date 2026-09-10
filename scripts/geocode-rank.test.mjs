@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pickPlaceResult, NAME_PREFIX, POI_CLASSES } from '../lib/geocode-rank.js';
+import { pickPlaceResult, NAME_PREFIX, POI_CLASSES, POI_TYPES } from '../lib/geocode-rank.js';
 
 // Caso real: "Andarax" es a la vez una calle y un bar/restaurante en Almería.
 const ANDARAX = [
@@ -36,6 +36,17 @@ test('nameHit es false cuando el mejor resultado no lleva el nombre buscado', ()
   const { best, nameHit } = pickPlaceResult(list, 'Bar Andarax', { lat: 36.84, lon: -2.46 });
   assert.equal(best.name, 'Bar de la Barandilla');
   assert.equal(nameHit, false); // -> el servidor reintenta sin el prefijo "Bar "
+});
+
+test('un hotel se detecta por `type` aunque `class`/`category` venga vacío', () => {
+  // Forma real de Nominatim/Geoapify para hoteles: {class:undefined, type:"hotel"}.
+  const list = [
+    { name: 'Avenida del Mediterráneo', class: 'highway', type: 'primary', addresstype: 'road', importance: 0.35, lat: '36.83', lon: '-2.45' },
+    { name: 'ah! Avenida Hotel', class: undefined, type: 'hotel', addresstype: 'building', importance: 0.1, lat: '36.8498', lon: '-2.4469', address: { house_number: '281', road: 'Avenida del Mediterráneo' } }
+  ];
+  const { best } = pickPlaceResult(list, 'Sercotel Avenida Almería', { lat: 36.84, lon: -2.46 });
+  assert.equal(best.type, 'hotel');
+  assert.ok(POI_TYPES.has('hotel') && POI_TYPES.has('museum'));
 });
 
 test('NAME_PREFIX quita el genérico inicial pero respeta el resto', () => {

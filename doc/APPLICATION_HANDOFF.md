@@ -2420,6 +2420,27 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.43 — Lugares personalizados: respaldo con Geoapify + nombres de marca
+
+- **Motivo.** «Sercotel Avenida Almería» no aparecía: en OSM ese hotel se llama
+  «ah! Avenida Hotel», así que Nominatim daba **0 resultados** para la marca.
+- **Cambios.**
+  - `server.js`: `geoapifyGeocode(q, center)` + `geoapifyToNominatim` — cuando
+    hay `GEOAPIFY_KEY` y Nominatim no da un POI claro con el nombre buscado,
+    se consulta el geocodificador **difuso de Geoapify** (encuentra marcas y
+    nombres comerciales que OSM no indexa así), se normaliza a la forma de
+    Nominatim y `pickPlaceResult` elige el mejor del conjunto combinado.
+  - `lib/geocode-rank.js`: nuevo `POI_TYPES` (hotel, hostel, museo, restaurante,
+    atracción…) — un POI se reconoce por `type` aunque `class`/`category` venga
+    vacío (los hoteles llegan como `{class:undefined, type:"hotel"}`).
+  - `OptionsPanel`: el lugar personalizado conserva **el texto que escribió el
+    usuario** como nombre (la geocodificación sólo aporta coordenadas); pista
+    «¿No aparece por su nombre? Prueba con la dirección».
+- **Verificado.** «Sercotel Avenida Almería», «Hotel Sercotel Avenida Almería» y
+  «Av. del Mediterráneo, 281, 04009 Almería» → todas al hotel correcto
+  (36.8498, -2.4469). Los casos de v1.2.42 (Andarax…) siguen bien.
+- **Validación.** `npm test` 67/67; `node --check`; `npm run build` limpio.
+
 ## v1.2.42 — Geocodificación de lugares personalizados mucho más fiable
 
 - **Motivo.** `geocode(q,{place:true})` cogía `d[0]` de Nominatim a ciegas: para

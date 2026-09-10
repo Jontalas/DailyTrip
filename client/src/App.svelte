@@ -839,7 +839,7 @@
   <header class="brand">
     <div class="brand__mark">
       <span class="dot"></span>
-      Travel Planner <small>v1.2.42</small>
+      Travel Planner <small>v1.2.43</small>
     </div>
     {#if !narrow && hasPlan}
       <button

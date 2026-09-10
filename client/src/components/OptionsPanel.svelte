@@ -123,8 +123,10 @@
     try {
       const g = await api.geocode({ q, place:true, near: routeBox() });
       if (!g || !Number.isFinite(g.lat)) throw new Error("No se encontró ese lugar.");
+      // Es una parada del usuario: se conserva SU texto como nombre (lo reconoce),
+      // la geocodificación sólo aporta las coordenadas.
       addCustomStopEnriched(
-        { id: `custom:${g.lat.toFixed(5)},${g.lon.toFixed(5)}`, name: g.name || q, lat: g.lat, lon: g.lon },
+        { id: `custom:${g.lat.toFixed(5)},${g.lon.toFixed(5)}`, name: q || g.name, lat: g.lat, lon: g.lon },
         $activeRoute || $routeData
       );
       customQuery = "";
@@ -149,7 +151,7 @@
     try {
       const g = await api.geocode({ q, place: true, near: nearPoint });
       if (!g || !Number.isFinite(g.lat)) throw new Error("No se encontró ese lugar.");
-      setCustomMeal(kind, { name: g.name || q, lat: g.lat, lon: g.lon });
+      setCustomMeal(kind, { name: q || g.name, lat: g.lat, lon: g.lon });
       mealQuery[kind] = "";
     } catch (e) {
       mealError[kind] = e.message || "No se pudo añadir.";
@@ -194,6 +196,7 @@
       {$mapPickMode === kind ? "Pulsa un punto del mapa… (cancelar)" : "＋ Marcar en el mapa"}
     </button>
     {#if mealError[kind]}<p class="c-err">{mealError[kind]}</p>{/if}
+    <p class="custom-hint">¿No aparece por su nombre? Prueba con la dirección (calle y número).</p>
   </div>
 {/snippet}
 
@@ -233,7 +236,7 @@
       <span class="g-title">Paradas personalizadas</span>
       <span class="g-count">{gCount(fCustom.length, $customStops.length)}</span>
     </summary>
-    <p class="custom-help">Añade cualquier lugar por nombre o en el mapa. Se colocará automáticamente donde encaje mejor en el itinerario.</p>
+    <p class="custom-help">Añade cualquier lugar por nombre o en el mapa. Se colocará automáticamente donde encaje mejor en el itinerario. Si no aparece por su nombre, prueba con la dirección.</p>
     <div class="custom-add">
       <div class="custom-row">
         <input
@@ -422,6 +425,7 @@
   .custom-section .custom-add {margin:0 10px 8px;}
   .custom-add--meal {margin:6px 10px 2px;}
   .custom-help {margin:4px 10px;font-size:11px;line-height:1.5;color:var(--text-faint);}
+  .custom-hint {margin:4px 0 0;font-size:10.5px;line-height:1.5;color:var(--text-faint);}
 
   .load-state { padding: 8px; color: var(--text-soft); font-size: var(--fs-12); }
   .load-state p { margin-bottom: 6px; }
