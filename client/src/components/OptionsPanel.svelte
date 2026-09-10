@@ -24,7 +24,7 @@
     categoryState = {},
     onretry,
     lunchOptions = [],
-    hiddenActivityIds = new Set(),
+    lateActivityIds = new Set(),
     lateLunchKeys = new Set()
   } = $props();
 
@@ -35,10 +35,6 @@
   function lunchIsSelected(item) {
     return $selected.lunch?.id === item.id && $selected.lunch?.lunchPhase === item.lunchPhase;
   }
-
-  let visibleActivities = $derived(
-    (pools.activities || []).filter((x) => actSel.has(x.id) || !hiddenActivityIds.has(x.id))
-  );
 
 
   // Acordeón: arranca todo colapsado; abrir uno cierra los demás. El grupo
@@ -200,14 +196,17 @@
     </summary>
     <div class="list scroll-y">
       {@render loadStatus("activities")}
-      {#each visibleActivities as item (item.id)}
-        <OptionCard {item} mode="multi" selected={actSel.has(item.id)} ontoggle={toggleActivity} />
+      {#each pools.activities || [] as item (item.id)}
+        <OptionCard
+          {item}
+          mode="multi"
+          selected={actSel.has(item.id)}
+          lateFinish={lateActivityIds.has(item.id)}
+          ontoggle={toggleActivity}
+        />
       {:else}
         {#if categoryState.activities?.status === "ok"}<p class="empty">Sin actividades propuestas.</p>{/if}
       {/each}
-      {#if (pools.activities || []).length - visibleActivities.length > 0}
-        <p class="hint">{(pools.activities || []).length - visibleActivities.length} harían terminar después de las 22:30</p>
-      {/if}
     </div>
   </details>
 
@@ -366,8 +365,7 @@
     overflow-x: hidden;
     overscroll-behavior: contain;
   }
-  .empty,
-  .hint {
+  .empty {
     font-size: 11px;
     color: var(--text-faint);
     padding: 4px 6px;

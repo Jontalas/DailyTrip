@@ -263,15 +263,19 @@ En escritorio:
 
 En pantallas estrechas se vuelve al flujo normal.
 
-## 2.10. Filtrado dinámico de viabilidad
+## 2.10. Viabilidad dinámica (sólo informativa)
 
 Cuando se selecciona o modifica una opción:
 
 - recalcular el día;
-- ocultar opciones que ya no caben;
-- conservar visibles las que ya están seleccionadas para que puedan desmarcarse.
+- **nunca ocultar opciones**: en ninguna sección se retira una opción de la
+  lista por horario, apertura o llegada/fin tardío;
+- cuando una opción no seleccionada rompería un límite del día, marcar su ficha
+  con un aviso informativo, sin bloquear la selección;
+- el usuario siempre puede elegir cualquier opción y ajustar el itinerario.
 
-Actualmente el límite aproximado del día usado por el frontend es **22:30**.
+Actualmente el límite aproximado del día usado por el frontend es **22:30**, y la
+ventana de comida protegida es **12:30–14:30**. Ambos generan avisos, no filtros.
 
 ---
 
@@ -1715,9 +1719,14 @@ Actual:
 22:30
 ```
 
-Las actividades no seleccionadas que harían superar aproximadamente esa hora se ocultan.
+Las actividades no seleccionadas que harían superar aproximadamente esa hora
+**no se ocultan**: se muestran todas y las que romperían el límite llevan un
+aviso en la ficha («elegirla haría terminar el día después de las 22:30. Puedes
+seleccionarla y ajustar el itinerario»). El conjunto `lateActivityIds`
+(`App.svelte`) alimenta ese aviso vía la prop `lateFinish` de `OptionCard`;
+antes alimentaba un filtro `visibleActivities` que se ha eliminado.
 
-Las ya seleccionadas permanecen visibles.
+Las ya seleccionadas permanecen visibles igualmente.
 
 ## Lunch viability
 
@@ -2327,6 +2336,76 @@ Al crearla:
 ---
 
 # 43. CHANGELOG DE CONTINUIDAD
+
+## v1.2.24 — Modo oscuro por defecto, origen por geolocalización y ninguna opción oculta
+
+- **Motivo.** Puesta en producción (Render, `dailytrip.onrender.com`) y tres
+  ajustes de arranque pedidos por el propietario del producto.
+- **Problema.** (1) La app arrancaba en tema del sistema; se quiere oscuro por
+  defecto. (2) «Salgo de» venía con un valor fijo («Málaga»); se quiere la
+  localidad real del usuario. (3) «Destino orientativo» venía con «Almería».
+  (4) La sección «Actividades en destino» ocultaba las opciones que harían
+  terminar el día después de las 22:30 y mostraba «N harían terminar después de
+  las 22:30»; se quiere que **nunca** se oculte ninguna opción en ninguna
+  sección, sólo avisos.
+- **Comportamiento anterior.**
+  - `theme` por defecto `"system"` (`stores.js`).
+  - `SearchPanel.svelte`: `origin = "Málaga"`, `target = "Almería"`.
+  - `OptionsPanel.svelte`: `visibleActivities` filtraba `pools.activities` con
+    `hiddenActivityIds` (salvo las ya seleccionadas) y pintaba un contador de
+    ocultas. `App.svelte` calculaba `hiddenActivityIds`.
+- **Comportamiento nuevo.**
+  - `theme` por defecto `"dark"`. `client/index.html` incluye un script en
+    `<head>` que fija `data-theme` antes de pintar (evita el flash claro) según
+    `localStorage["tp-theme"]`, con `"dark"` como valor por defecto. Se sigue
+    respetando la elección previa guardada; el botón sigue ciclando
+    Oscuro → Auto → Claro.
+  - `SearchPanel.svelte`: `origin` y `target` arrancan vacíos. En `onMount`, si
+    `navigator.geolocation` está disponible, se pide la posición y se convierte
+    a nombre de localidad con `POST /api/geocode {lat,lon}` (reverse geocode ya
+    existente). Nunca sobrescribe lo que el usuario haya escrito
+    (`originTouched`); si falla o se deniega, el campo queda vacío con un aviso.
+  - `OptionsPanel.svelte`: se elimina `visibleActivities` y el contador de
+    ocultas. Las actividades se listan todas; `App.svelte` renombra
+    `hiddenActivityIds` → `lateActivityIds` (misma fórmula, `end > DAY_END`) y se
+    pasa como `lateFinish` a `OptionCard`, que muestra un aviso análogo al de
+    `lateArrival` de comida.
+- **Archivos y funciones afectadas.**
+  - `client/src/lib/stores.js`: valor inicial de `theme`.
+  - `client/index.html`: script anti-flash de tema; `<title>` a 1.2.24.
+  - `client/src/components/SearchPanel.svelte`: estado inicial, `onMount` con
+    geolocalización, placeholders, aviso de fallo.
+  - `client/src/App.svelte`: `hiddenActivityIds` → `lateActivityIds`; prop a
+    `OptionsPanel`.
+  - `client/src/components/OptionsPanel.svelte`: sin `visibleActivities` ni
+    contador; `{#each pools.activities}` con `lateFinish`; CSS `.hint` retirado.
+  - `client/src/components/OptionCard.svelte`: prop `lateFinish` + aviso.
+  - `server.js`, `package.json`, `.env(.example)`, `render.yaml`: versión 1.2.24.
+- **Constantes/límites.** Sin cambios. `DAY_END = 1350` (22:30) y la ventana de
+  comida 12:30–14:30 siguen igual; sólo dejan de filtrar y pasan a avisar.
+- **Nuevos invariantes.**
+  - Ninguna sección de opciones (paradas personalizadas, paradas en ruta,
+    comida, actividades, cena, alojamiento) oculta una opción por horario,
+    apertura o llegada/fin tardío. Todas son siempre seleccionables.
+  - El tema por defecto es oscuro salvo elección explícita guardada.
+- **Qué se conserva.** Cálculo de viabilidad (`approximateSchedule`,
+  `isLunchViable`), avisos del itinerario, botón de tema y su persistencia,
+  sección de comida ya no-filtrante desde v1.2.18.
+- **Fallbacks/errores.** Sin geolocalización disponible, permiso denegado o
+  reverse geocode fallido: «Salgo de» queda vacío + aviso; el usuario escribe la
+  ciudad. Si `localStorage` no es accesible, el script de tema aplica `"dark"`.
+- **Impacto UI.** Arranque en oscuro; «Salgo de» puede pedir permiso de
+  ubicación y autocompletarse; ambos campos de búsqueda vacíos al inicio; la
+  lista de actividades ya no encoge y las inviables llevan aviso en la ficha.
+- **Impacto APIs.** Una llamada extra a `POST /api/geocode` (reverse, Nominatim)
+  por carga inicial cuando hay geolocalización. Sujeta al rate-limit de
+  Nominatim ya existente.
+- **Compatibilidad.** `localStorage["tp-theme"]` previo se respeta. Sin cambios
+  de caché ni de formato de datos.
+- **Validación.** `npm run build` OK; `npm test` 40/40; `node --check server.js`.
+- **Limitaciones que permanecen.** La geolocalización exige HTTPS (cumplido en
+  Render y localhost). El reverse geocode devuelve el núcleo poblado más
+  cercano, que puede no ser exactamente donde está el usuario.
 
 ## v1.2.23 — Paradas personalizadas colapsables y scroll general del rail izquierdo
 

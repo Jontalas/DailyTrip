@@ -318,8 +318,8 @@
     void Promise.all(['route','routeLunch'].map(key=>retryCategory(key,generation)));
   }
 
-  /* ---- Viabilidad temporal (ocultar opciones que no caben) ----------- */
-  let hiddenActivityIds = $derived.by(() => {
+  /* ---- Viabilidad temporal (SÓLO informar: nunca se ocultan) --------- */
+  let lateActivityIds = $derived.by(() => {
     const set = new Set();
     const rd = $routeData;
     const ch = $chosen;
@@ -444,7 +444,7 @@
         <OptionsPanel
           pools={planPools}
           lunchOptions={$lunchOptions}
-          {hiddenActivityIds}
+          {lateActivityIds}
           {lateLunchKeys}
           {categoryState}
           onretry={(key) => retryCategory(key)}
