@@ -79,8 +79,10 @@ export const aiCuration = writable({ route: "idle", activities: "idle" });
    el mapa). Van SIEMPRE seleccionadas. Borrarlas no deja rastro. */
 export const customStops = writable([]);
 
-/* Modo "marcar en el mapa": el próximo clic en el mapa añade una parada. */
-export const mapPickMode = writable(false);
+/* Modo "marcar en el mapa": el próximo clic en el mapa fija un lugar.
+   null = inactivo · "route" = parada personalizada · "lunch" | "dinner" | "hotel"
+   = comida / cena / alojamiento personalizados. */
+export const mapPickMode = writable(null);
 
 /* ---- Helpers de duración (portados de app.js) --------------------------- */
 export function recommendedMinutes(item) {
@@ -123,7 +125,7 @@ export function resetPlan() {
   selected.set(emptySelected());
   customStops.set([]);
   openOptionGroup.set(null);
-  mapPickMode.set(false);
+  mapPickMode.set(null);
   revealOptionId.set(null);
 }
 
@@ -159,6 +161,37 @@ export function setDinner(item) {
 export function setHotel(item) {
   if (item) ensureCustomDuration(item);
   selected.update((s) => ({ ...s, hotel: item || null }));
+}
+
+/* ---- Comida / cena / alojamiento personalizados ----------------------------
+   Igual que una parada personalizada, pero para una selección única. El lugar se
+   guarda dentro de `selected` (se persiste con el viaje) y se pinta en el mapa
+   porque va seleccionado. */
+export function makeCustomPlace(kind, { name, lat, lon } = {}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const isHotel = kind === "hotel";
+  return {
+    id: `custom:${kind}:${lat.toFixed(5)},${lon.toFixed(5)}`,
+    name: name || `Punto ${lat.toFixed(3)}, ${lon.toFixed(3)}`,
+    lat, lon,
+    category: isHotel ? "accommodation" : "restaurant",
+    categories: [isHotel ? "accommodation" : "catering.restaurant"],
+    custom: true, source: "custom", verified: true,
+    interestScore: 60,
+    durationMin: isHotel ? 20 : 75,
+    website: "", openingHours: "",
+    ...(kind === "lunch" ? { lunchPhase: "destination" } : {})
+  };
+}
+
+export function setCustomMeal(kind, raw) {
+  const item = makeCustomPlace(kind, raw);
+  if (!item) return null;
+  if (kind === "lunch") setLunch(item);
+  else if (kind === "dinner") setDinner(item);
+  else if (kind === "hotel") setHotel(item);
+  else return null;
+  return item;
 }
 
 /* ---- Paradas personalizadas -------------------------------------------- */
@@ -224,6 +257,10 @@ export function groupOfOptionId(id) {
   const p = get(pools);
   const cs = get(customStops);
   if(cs.some(x=>x.id===id))return "custom";
+  const sel0 = get(selected);
+  if (sel0.lunch?.custom && sel0.lunch.id === id) return "lunch";
+  if (sel0.dinner?.custom && sel0.dinner.id === id) return "dinner";
+  if (sel0.hotel?.custom && sel0.hotel.id === id) return "hotel";
   if ((p.route || []).some((x) => x.id === id)) return "route";
   if ((p.activities || []).some((x) => x.id === id)) return "act";
   if ((p.lodging || []).some((x) => x.id === id)) return "hotel";

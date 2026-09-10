@@ -4,7 +4,7 @@ import {dayStops,orderDay} from '../client/src/lib/day-plan.js';
 import {routeDay} from '../lib/day-routing.js';
 import {buildItinerary,legKey,isLunchViable,travelPoints} from '../client/src/lib/itinerary.js';
 import {get} from 'svelte/store';
-import {pools,selected as selectionStore,emptySelected,emptyPools,openOptionGroup,groupOfOptionId,selectFoodFromMap} from '../client/src/lib/stores.js';
+import {pools,selected as selectionStore,emptySelected,emptyPools,openOptionGroup,groupOfOptionId,selectFoodFromMap,makeCustomPlace,setCustomMeal} from '../client/src/lib/stores.js';
 import {matchesPlace,placeContent} from '../lib/place-content.js';
 import {destinationScale,topInterest,latestPopulation} from '../lib/destination-options.js';
 import {applyPreferences,applyAiToPool,dedupePool,normName} from '../client/src/lib/scoring.js';
@@ -245,6 +245,30 @@ test('recorte conserva interés máximo y preferencias no ordenan por desvío',(
   const result=applyPreferences({route:items},[]).route;
   assert.equal(result[0].interestScore,99);
   assert.ok(Math.min(...topInterest(items,20).map(x=>x.interestScore))>=Math.max(...items.filter(x=>!topInterest(items,20).includes(x)).map(x=>x.interestScore)));
+});
+
+test('makeCustomPlace / setCustomMeal crean un lugar válido y lo fijan como comida/cena/alojamiento',()=>{
+  selectionStore.set(emptySelected());
+  const lunch=makeCustomPlace('lunch',{name:'Casa Paco',lat:37.1,lon:-3.6});
+  assert.equal(lunch.custom,true);
+  assert.equal(lunch.source,'custom');
+  assert.equal(lunch.lunchPhase,'destination');
+  assert.ok(/restaurant/.test(lunch.category));
+  assert.match(lunch.id,/^custom:lunch:/);
+  const hotel=makeCustomPlace('hotel',{name:'Hostal Sur',lat:37.2,lon:-3.5});
+  assert.ok(/accommodation/.test(hotel.category));
+  assert.equal(makeCustomPlace('lunch',{lat:NaN,lon:1}),null);
+
+  setCustomMeal('lunch',{name:'Casa Paco',lat:37.1,lon:-3.6});
+  setCustomMeal('dinner',{name:'La Marina',lat:37.15,lon:-3.55});
+  setCustomMeal('hotel',{name:'Hostal Sur',lat:37.2,lon:-3.5});
+  const s=get(selectionStore);
+  assert.equal(s.lunch?.name,'Casa Paco');
+  assert.equal(s.dinner?.name,'La Marina');
+  assert.equal(s.hotel?.name,'Hostal Sur');
+  assert.equal(groupOfOptionId(s.hotel.id),'hotel');
+  assert.equal(groupOfOptionId(s.lunch.id),'lunch');
+  selectionStore.set(emptySelected());
 });
 
 test('dedupePool colapsa repetidas por nombre/proximidad y no fusiona homónimos lejanos',()=>{

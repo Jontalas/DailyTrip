@@ -272,6 +272,20 @@ export function createMapController(container) {
     register(lastPools.food, "food", ["lunch", "dinner"]); // comida/cena en destino
     register(lastPools.lodging, "lodging", ["hotel"]);
 
+    // Comida/cena/alojamiento PERSONALIZADOS: no están en ningún pool; se pintan
+    // siempre porque van seleccionados.
+    for (const [sel, kind] of [
+      [lastSelected.lunch, "food"],
+      [lastSelected.dinner, "food"],
+      [lastSelected.hotel, "lodging"]
+    ]) {
+      if (!sel?.custom || markersById.has(sel.id)) continue;
+      if (!Number.isFinite(sel.lat) || !Number.isFinite(sel.lon)) continue;
+      itemsById.set(sel.id, { item: sel, kind });
+      const m = makeMarker(sel, kind, true).addTo(layers.markers);
+      markersById.set(sel.id, { marker: m, item: sel, kind });
+    }
+
     // rehacer el marcador transitorio si seguimos señalando un destino no fijado
     if (hoveredId && !markersById.has(hoveredId)) {
       const rec = itemsById.get(hoveredId);

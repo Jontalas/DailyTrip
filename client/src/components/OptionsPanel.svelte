@@ -15,7 +15,8 @@
     mapPickMode,
     customStops,
     addCustomStopEnriched,
-    removeCustomStop
+    removeCustomStop,
+    setCustomMeal
   } from "../lib/stores.js";
   import { api } from "../lib/api.js";
 
@@ -93,6 +94,28 @@
       customBusy = false;
     }
   }
+
+  // ---- Comida / cena / alojamiento personalizados ----
+  let mealQuery = $state({ lunch: "", dinner: "", hotel: "" });
+  let mealBusy = $state({ lunch: false, dinner: false, hotel: false });
+  let mealError = $state({ lunch: "", dinner: "", hotel: "" });
+
+  async function addMealByName(kind) {
+    const q = mealQuery[kind].trim();
+    if (!q || mealBusy[kind]) return;
+    mealBusy[kind] = true;
+    mealError[kind] = "";
+    try {
+      const g = await api.geocode({ q, place: true });
+      if (!g || !Number.isFinite(g.lat)) throw new Error("No se encontró ese lugar.");
+      setCustomMeal(kind, { name: g.name || q, lat: g.lat, lon: g.lon });
+      mealQuery[kind] = "";
+    } catch (e) {
+      mealError[kind] = e.message || "No se pudo añadir.";
+    } finally {
+      mealBusy[kind] = false;
+    }
+  }
 </script>
 
 {#snippet loadStatus(key)}
@@ -105,6 +128,32 @@
       {/if}
     </div>
   {/if}
+{/snippet}
+
+{#snippet mealCustomAdd(kind, what)}
+  <div class="custom-add custom-add--meal">
+    <div class="custom-row">
+      <input
+        type="text"
+        placeholder={`Añadir ${what} por nombre…`}
+        bind:value={mealQuery[kind]}
+        onkeydown={(e) => e.key === "Enter" && addMealByName(kind)}
+        aria-label={`Buscar un lugar para usarlo como ${what}`}
+      />
+      <button type="button" class="mini" onclick={() => addMealByName(kind)} disabled={mealBusy[kind] || !mealQuery[kind].trim()}>
+        {mealBusy[kind] ? "…" : "Añadir"}
+      </button>
+    </div>
+    <button
+      type="button"
+      class="mini mini--ghost"
+      class:on={$mapPickMode === kind}
+      onclick={() => mapPickMode.set($mapPickMode === kind ? null : kind)}
+    >
+      {$mapPickMode === kind ? "Pulsa un punto del mapa… (cancelar)" : "＋ Marcar en el mapa"}
+    </button>
+    {#if mealError[kind]}<p class="c-err">{mealError[kind]}</p>{/if}
+  </div>
 {/snippet}
 
 {#snippet aiDot(kind)}
@@ -147,10 +196,10 @@
       <button
         type="button"
         class="mini mini--ghost"
-        class:on={$mapPickMode}
-        onclick={() => mapPickMode.update((v) => !v)}
+        class:on={$mapPickMode === "route"}
+        onclick={() => mapPickMode.set($mapPickMode === "route" ? null : "route")}
       >
-        {$mapPickMode ? "Pulsa un punto del mapa… (cancelar)" : "＋ Marcar en el mapa"}
+        {$mapPickMode === "route" ? "Pulsa un punto del mapa… (cancelar)" : "＋ Marcar en el mapa"}
       </button>
       {#if customError}<p class="c-err">{customError}</p>{/if}
     </div>
@@ -193,10 +242,14 @@
     </summary>
     {@render loadStatus("routeLunch")}
     {@render loadStatus("food")}
+    {@render mealCustomAdd("lunch", "comida")}
     <div class="list scroll-y">
       <button class="none" class:on={!$selected.lunch} type="button" onclick={() => setLunch(null)}>
         Sin restaurante — se reserva el bloque igualmente
       </button>
+      {#if $selected.lunch?.custom}
+        <OptionCard item={$selected.lunch} mode="single" meal="lunch" custom selected phaseLabel="EN DESTINO" onselect={() => setLunch(null)} onremove={() => setLunch(null)} />
+      {/if}
       {#each lunchOptions as item (item.lunchPhase + ":" + item.id)}
         <OptionCard
           {item}
@@ -240,9 +293,13 @@
       <span class="g-title">Cena</span>
       <span class="g-count">{(pools.food || []).length}</span>
     </summary>
+    {@render loadStatus("food")}
+    {@render mealCustomAdd("dinner", "cena")}
     <div class="list scroll-y">
-      {@render loadStatus("food")}
       <button class="none" class:on={!$selected.dinner} type="button" onclick={() => setDinner(null)}>Sin cena</button>
+      {#if $selected.dinner?.custom}
+        <OptionCard item={$selected.dinner} mode="single" meal="dinner" custom selected onselect={() => setDinner(null)} onremove={() => setDinner(null)} />
+      {/if}
       {#each pools.food || [] as item (item.id)}
         <OptionCard {item} mode="single" quality meal="dinner" selected={$selected.dinner?.id === item.id} onselect={(x) => setDinner(x)} />
       {/each}
@@ -254,9 +311,13 @@
       <span class="g-title">Alojamiento</span>
       <span class="g-count">{(pools.lodging || []).length}</span>
     </summary>
+    {@render loadStatus("lodging")}
+    {@render mealCustomAdd("hotel", "alojamiento")}
     <div class="list scroll-y">
-      {@render loadStatus("lodging")}
       <button class="none" class:on={!$selected.hotel} type="button" onclick={() => setHotel(null)}>Sin alojamiento</button>
+      {#if $selected.hotel?.custom}
+        <OptionCard item={$selected.hotel} mode="single" custom selected onselect={() => setHotel(null)} onremove={() => setHotel(null)} />
+      {/if}
       {#each pools.lodging || [] as item (item.id)}
         <OptionCard {item} mode="single" quality selected={$selected.hotel?.id === item.id} onselect={(x) => setHotel(x)} />
       {/each}
@@ -266,6 +327,7 @@
 
 <style>
   .custom-section .custom-add {margin:0 10px 8px;}
+  .custom-add--meal {margin:6px 10px 2px;}
   .custom-help {margin:4px 10px;font-size:11px;line-height:1.5;color:var(--text-faint);}
 
   .load-state { padding: 8px; color: var(--text-soft); font-size: var(--fs-12); }
@@ -476,7 +538,8 @@
   }
   .groups.mobile .load-state { padding: 6px 0 10px; }
   .groups.mobile .custom-help,
-  .groups.mobile .custom-section .custom-add { margin-left: 0; margin-right: 0; }
+  .groups.mobile .custom-section .custom-add,
+  .groups.mobile .custom-add--meal { margin-left: 0; margin-right: 0; }
   .groups.mobile .custom-row input { height: 44px; font-size: var(--fs-14); }
   .groups.mobile .mini,
   .groups.mobile .mini--ghost { height: 44px; font-size: var(--fs-13); }

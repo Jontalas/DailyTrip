@@ -8,7 +8,8 @@
     mapPickMode,
     groupOfOptionId,
     selectFoodFromMap,
-    addCustomStopEnriched
+    addCustomStopEnriched,
+    setCustomMeal
   } from "../lib/stores.js";
   import { api } from "../lib/api.js";
   import { detourLevel } from "../lib/format.js";
@@ -52,23 +53,28 @@
   });
 
   async function onMapClick(e) {
-    if (!$mapPickMode || !e?.latlng) return;
+    const mode = $mapPickMode;
+    if (!mode || !e?.latlng) return;
     const { lat, lng } = e.latlng;
     let name = "";
     try {
       const g = await api.geocode({ lat, lon: lng });
       name = g?.name || "";
     } catch {}
-    addCustomStopEnriched(
-      {
-        id: `custom:${lat.toFixed(5)},${lng.toFixed(5)}`,
-        name: name || `Punto ${lat.toFixed(3)}, ${lng.toFixed(3)}`,
-        lat,
-        lon: lng
-      },
-      routeData
-    );
-    mapPickMode.set(false);
+    if (mode === "route") {
+      addCustomStopEnriched(
+        {
+          id: `custom:${lat.toFixed(5)},${lng.toFixed(5)}`,
+          name: name || `Punto ${lat.toFixed(3)}, ${lng.toFixed(3)}`,
+          lat,
+          lon: lng
+        },
+        routeData
+      );
+    } else {
+      setCustomMeal(mode, { name, lat, lon: lng });
+    }
+    mapPickMode.set(null);
   }
 
   onDestroy(() => {

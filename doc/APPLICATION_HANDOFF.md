@@ -2420,6 +2420,31 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.40 — Comida / cena / alojamiento personalizados (como la parada custom)
+
+- **Qué.** En los grupos «Comida», «Cena» y «Alojamiento» hay ahora una fila
+  «Añadir … por nombre» + «＋ Marcar en el mapa», igual que las paradas
+  personalizadas. El lugar elegido se fija como esa selección y se muestra como
+  ficha (con ✕ para quitarlo).
+- **Cómo.**
+  - `stores.js`: `mapPickMode` pasa de booleano a `null | "route" | "lunch" |
+    "dinner" | "hotel"`. Nuevos `makeCustomPlace(kind,{name,lat,lon})` (item
+    `custom/source:"custom"/verified`, categoría `restaurant`/`accommodation`,
+    `durationMin` 75/20, `lunchPhase:"destination"` para la comida) y
+    `setCustomMeal(kind, raw)` → `setLunch/setDinner/setHotel`.
+    `groupOfOptionId` reconoce los ids de comida/cena/hotel personalizados.
+  - `MapCanvas.onMapClick`: según `mapPickMode` añade parada (`"route"`) o fija
+    comida/cena/alojamiento (`setCustomMeal`).
+  - `map.js`: los lugares personalizados de comida/cena/alojamiento se pintan
+    siempre (van seleccionados y no están en ningún pool).
+  - `OptionsPanel.svelte`: snippet `mealCustomAdd(kind, what)` en los tres grupos;
+    la selección personalizada se renderiza desde `$selected` (no está en las
+    listas de opciones).
+  - Persistencia: al ir dentro de `selected`, se guardan y recargan con el viaje
+    sin cambios en `trip-state.js`. Se incluyen en la exportación a Google Maps.
+- **Validación.** `npm test` 61/61 (nuevo caso `makeCustomPlace`/`setCustomMeal`);
+  `node --check`; `npm run build` limpio.
+
 ## v1.2.39 — Exportar la ruta del día a Google Maps
 
 - **Qué.** Enlace «Abrir en Google Maps ↗» en `ItineraryPanel` (junto a
