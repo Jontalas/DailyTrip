@@ -146,10 +146,24 @@ export function createMapController(container) {
     }).addTo(layers.route);
   }
 
+  // Relleno inferior extra (px) para que una hoja móvil que ocupa la parte baja
+  // no tape la ruta: el encuadre se desplaza hacia arriba.
+  let bottomInset = 0;
+  function setBottomInset(px) {
+    const v = Math.max(0, Math.round(Number(px) || 0));
+    if (v === bottomInset) return;
+    bottomInset = v;
+    fitToRoute();
+  }
+
   function fitToRoute() {
     if (!base?.routeData?.coords?.length) return;
     const ll = base.routeData.coords.map((c) => [c.lat, c.lon]);
-    map.fitBounds(L.latLngBounds(ll), { animate: true, ...FIT_INSETS });
+    map.fitBounds(L.latLngBounds(ll), {
+      animate: true,
+      paddingTopLeft: FIT_INSETS.paddingTopLeft,
+      paddingBottomRight: [FIT_INSETS.paddingBottomRight[0], FIT_INSETS.paddingBottomRight[1] + bottomInset]
+    });
   }
 
   const EMPTY_POOLS = { route: [], activities: [], food: [], lodging: [] };
@@ -427,6 +441,7 @@ export function createMapController(container) {
     drawDayRoute,
     drawItineraryRoute,
     clearItineraryRoute,
+    setBottomInset,
     invalidate,
     destroy
   };

@@ -39,7 +39,8 @@
     lunchOptions,
     openOptionGroup,
     customStops,
-    mobileTask
+    mobileTask,
+    mapPickMode
   } from "./lib/stores.js";
 
   /* ---- Tema ------------------------------------------------------------- */
@@ -54,7 +55,13 @@
     const apply = () => (narrow = mq.matches);
     apply();
     mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
+    const onResize = () => (winH = window.innerHeight);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => {
+      mq.removeEventListener("change", apply);
+      window.removeEventListener("resize", onResize);
+    };
   });
 
   $effect(() => {
@@ -76,9 +83,26 @@
   let originText = $state("Málaga");
   let planLoaded = $state(false);
   let narrow = $state(false);
+  let winH = $state(800);
   let editingSearch = $state(false); // reabrir búsqueda con el plan ya cargado
 
   /* ---- Hoja enfocada de móvil ---------------------------------------- */
+  // La hoja de opciones (paradas/comida/cena/dormir/planes) NO tapa el mapa:
+  // sin scrim, por encima de la barra y a media altura ("peek"), ampliable con
+  // el asa. Sólo búsqueda e itinerario ocupan pantalla completa con scrim.
+  let sheetExpanded = $state(false);
+  const SCRIM_TASKS = ["search", "itin"];
+  let sheetScrim = $derived(SCRIM_TASKS.includes($mobileTask));
+  let sheetTall = $derived(sheetScrim || sheetExpanded);
+  $effect(() => { $mobileTask; sheetExpanded = false; }); // cada tarea arranca en peek
+  // Empujar el encuadre del mapa hacia arriba lo que ocupa la hoja de opciones,
+  // para que la ruta y los pines queden en la mitad visible.
+  let mapBottomInset = $derived(
+    narrow && $mobileTask && !sheetScrim && !$mapPickMode
+      ? Math.round(winH * (sheetTall ? 0.8 : 0.44)) + 82
+      : 0
+  );
+
   function closeSheet() {
     mobileTask.set(null);
     openOptionGroup.set(null);
@@ -569,12 +593,13 @@
     openGroup={$openOptionGroup}
     departureMin={depMin}
     durations={durationsMap}
+    bottomInset={mapBottomInset}
   />
 
   <header class="brand">
     <div class="brand__mark">
       <span class="dot"></span>
-      Travel Planner <small>v1.2.26</small>
+      Travel Planner <small>v1.2.27</small>
     </div>
     {#if !narrow && hasPlan}
       <button
@@ -615,9 +640,26 @@
     />
 
     {#if $mobileTask}
-      <div class="m-scrim" role="presentation" onclick={closeSheet}></div>
-      <section class="m-sheet" aria-label={SHEET_TITLES[$mobileTask] || "Panel"}>
+      {#if sheetScrim}
+        <div class="m-scrim" role="presentation" onclick={closeSheet}></div>
+      {/if}
+      <section
+        class="m-sheet"
+        class:is-scrim={sheetScrim}
+        class:is-tall={sheetTall}
+        class:is-ducked={$mapPickMode && !sheetScrim && !sheetExpanded}
+        aria-label={SHEET_TITLES[$mobileTask] || "Panel"}
+      >
         <header class="m-sheet__head">
+          {#if !sheetScrim}
+            <button
+              class="m-sheet__grab"
+              type="button"
+              aria-label={sheetExpanded ? "Contraer panel" : "Ampliar panel"}
+              aria-expanded={sheetExpanded}
+              onclick={() => (sheetExpanded = !sheetExpanded)}
+            ></button>
+          {/if}
           <h2>{SHEET_TITLES[$mobileTask] || ""}</h2>
           <button class="m-sheet__x" type="button" onclick={closeSheet} aria-label="Cerrar">✕</button>
         </header>
@@ -825,36 +867,54 @@
     position: absolute;
     left: 0;
     right: 0;
-    bottom: 0;
+    /* Por defecto (opciones): por encima de la barra, sin tapar el mapa. */
+    bottom: calc(78px + env(safe-area-inset-bottom));
     z-index: var(--z-overlay);
     display: flex;
     flex-direction: column;
-    max-height: 86vh;
+    height: 44vh;
     background: var(--bg-elev);
     border: 1px solid var(--glass-border);
     border-bottom: 0;
     border-radius: var(--r-xl) var(--r-xl) 0 0;
     box-shadow: var(--sh-4);
+    transition: height var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-out);
+  }
+  .m-sheet.is-tall { height: 80vh; }
+  .m-sheet.is-scrim {
+    /* Búsqueda / itinerario: pantalla completa, tapa la barra. */
+    bottom: 0;
+    height: 88vh;
+  }
+  .m-sheet.is-ducked {
+    /* "Marcar en el mapa": la hoja se retira dejando sólo el asa. */
+    transform: translateY(calc(100% - 42px));
   }
   .m-sheet__head {
     position: relative;
+    flex: none;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-2);
-    padding: 14px 14px 10px;
+    padding: 16px 14px 10px;
     border-bottom: 1px solid var(--line);
   }
-  .m-sheet__head::before {
-    content: "";
+  .m-sheet__grab {
     position: absolute;
     top: 6px;
     left: 50%;
     transform: translateX(-50%);
-    width: 40px;
-    height: 4px;
+    width: 44px;
+    height: 5px;
+    padding: 0;
     border-radius: var(--r-pill);
     background: var(--line-strong);
+  }
+  .m-sheet__grab::after {
+    content: "";
+    position: absolute;
+    inset: -14px -40px;
   }
   .m-sheet__head h2 {
     margin: 0;

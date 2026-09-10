@@ -24,7 +24,8 @@
     selected = null,
     openGroup = null,
     departureMin = 570,
-    durations = null
+    durations = null,
+    bottomInset = 0
   } = $props();
 
   let el;
@@ -78,6 +79,11 @@
 
   $effect(() => {
     if (ctl) ctl.setTheme(theme);
+  });
+
+  // La hoja móvil de opciones ocupa la parte baja: reencuadra la ruta hacia arriba.
+  $effect(() => {
+    if (ctl) ctl.setBottomInset(bottomInset);
   });
 
   // Corredor base (se redibuja al cambiar la ruta)

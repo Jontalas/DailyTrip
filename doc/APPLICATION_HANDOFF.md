@@ -2378,6 +2378,45 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.27 — Móvil: la hoja de opciones no tapa el mapa
+
+- **Motivo.** En v1.2.26 las hojas que añaden puntos (Añadir, Comida, Cena,
+  Dormir, Planes) ocupaban hasta 86vh con scrim y tapaban el mapa: justo el
+  problema que hacía la app poco usable en móvil. Hay que ver el mapa mientras se
+  eligen esas opciones.
+- **Comportamiento anterior.** `.m-sheet`: `bottom: 0`, `max-height: 86vh`,
+  siempre con `.m-scrim` (mapa oscurecido y no interactivo). La barra quedaba
+  tapada por la hoja.
+- **Comportamiento nuevo.**
+  - Las hojas de opción (`route`/`custom`/`lunch`/`act`/`dinner`/`hotel`) van
+    **sin scrim**, **por encima de la barra** (`bottom: 78px`, la barra sigue
+    visible y permite cambiar de categoría sin cerrar) y a **media altura**
+    (`44vh`, «peek»). El asa (`.m-sheet__grab` → `sheetExpanded`) las amplía a
+    `80vh` y las vuelve a bajar. Cambiar de tarea reinicia a peek.
+  - Sólo `search` e `itin` (`SCRIM_TASKS`) siguen a pantalla completa (`88vh`,
+    `bottom: 0`) con scrim — son entrada de formulario / lectura, no exploración
+    del mapa.
+  - Nuevo `mapBottomInset` (`App.svelte`, px según `winH` y peek/tall) → prop
+    `bottomInset` de `MapCanvas` → `map.js` `setBottomInset()` añade ese relleno
+    inferior a `fitToRoute()`, de modo que la ruta y los pines quedan en la mitad
+    visible del mapa.
+  - Con «marcar en el mapa» (`mapPickMode`) la hoja se repliega (`.is-ducked`)
+    dejando sólo el asa, para tocar el mapa; se restaura al terminar.
+- **Archivos.** `client/src/App.svelte` (estado `sheetExpanded`/`winH`, derivados
+  `sheetScrim`/`sheetTall`/`mapBottomInset`, markup del asa y clases
+  `is-scrim`/`is-tall`/`is-ducked`, estilos `.m-sheet*`), `MobileBar` sin cambios,
+  `client/src/components/MapCanvas.svelte` (prop `bottomInset` + `$effect`),
+  `client/src/lib/map.js` (`setBottomInset`, `fitToRoute` con el inset).
+  Versión 1.2.27 en los 5 sitios + `App.svelte`.
+- **Nuevos invariantes.** En ≤1024 px, elegir paradas/comida/cena/alojamiento/
+  actividades no oculta el mapa: la hoja ocupa como mucho media pantalla salvo
+  que el usuario la amplíe con el asa; el mapa se reencuadra para no quedar
+  detrás de la hoja.
+- **Qué se conserva.** Toda la lógica de v1.2.26; escritorio intacto.
+- **Validación.** `npm run build` limpio; `npm test` 45/45; `node --check`. La
+  carga de opciones no completó en el sandbox (fetch lento de proveedores); el
+  cambio es CSS + un derivado y queda pendiente de confirmación en móvil real.
+
 ## v1.2.26 — Rediseño móvil map-primary: mapa a pantalla completa + barra + hoja enfocada
 
 - **Motivo.** La versión ≤1024 px (hoja inferior con pestañas Opciones/Itinerario
@@ -4798,9 +4837,18 @@ a una sola tarea**, invocada desde una **barra flotante inferior**
   «Buscar etapa»; base sin plan → «Preparar el día»; con plan → Ajustes · Paradas
   · Añadir · Comida · Cena · Dormir · Planes · Itinerario. `open(task)` fija
   `mobileTask` y sincroniza `openOptionGroup`.
-- La hoja (`.m-sheet` en `App.svelte`) tiene cabecera (título de `SHEET_TITLES` +
-  ✕), cuerpo con scroll y un scrim (`.m-scrim`) que la cierra. `closeSheet()`
-  pone `mobileTask` y `openOptionGroup` a `null`.
+- La hoja (`.m-sheet` en `App.svelte`) tiene cabecera (título de `SHEET_TITLES`,
+  asa y ✕) y cuerpo con scroll. `closeSheet()` pone `mobileTask` y
+  `openOptionGroup` a `null`.
+- **Alturas (desde v1.2.27).** Las hojas de opción (`route`/`custom`/`lunch`/
+  `act`/`dinner`/`hotel`) **no tapan el mapa**: van sin scrim, por encima de la
+  barra (`bottom: 78px`) y a media altura (`44vh`, «peek»); el asa
+  (`.m-sheet__grab` → `sheetExpanded`) las amplía a `80vh` y vuelve a bajarlas.
+  Cambian a peek al cambiar de tarea. Sólo `search` e `itin` (en `SCRIM_TASKS`)
+  ocupan pantalla completa (`88vh`, `bottom: 0`) con scrim. El derivado
+  `mapBottomInset` (px, según `winH` y peek/tall) se pasa a `MapCanvas` →
+  `ctl.setBottomInset()` → `fitToRoute()` reencuadra la ruta en la mitad visible.
+  Con «marcar en el mapa» activo la hoja se repliega (`.is-ducked`) dejando el asa.
 - `{#snippet mobileTaskView(task)}` reparte el contenido reutilizando los
   componentes de escritorio: `SearchPanel`+`BaseResults` (search), la mini-tarjeta
   de salida+`loadPlan` (prep), hora de salida+`PreferencesBar` (tune),
