@@ -1710,6 +1710,13 @@ Desde v1.2.23 «Paradas personalizadas» se comporta igual que el resto: era una
 sección siempre visible (v1.2.19) y ahora es un `<details>` más del acordeón
 (misma flecha que rota, mismo borde inferior al abrir, misma exclusión mutua).
 
+**Móvil (≤1024 px, desde v1.2.26).** `OptionsPanel` recibe `mobile` y sólo se
+usa dentro de la hoja enfocada: el CSS oculta todos los `<details>` salvo el
+abierto (`openOptionGroup`), esconde los `summary` (el título va en la cabecera
+de la hoja) y quita el scroll propio de `.list` (la hoja ya hace scroll). El
+acordeón deja de verse como tal: cada categoría es una hoja de una sola tarea
+(ver §46, sección móvil).
+
 ---
 
 # 29. VIABILIDAD TEMPORAL
@@ -2370,6 +2377,66 @@ Al crearla:
 ---
 
 # 43. CHANGELOG DE CONTINUIDAD
+
+## v1.2.26 — Rediseño móvil map-primary: mapa a pantalla completa + barra + hoja enfocada
+
+- **Motivo.** La versión ≤1024 px (hoja inferior con pestañas Opciones/Itinerario
+  que contenía los mismos componentes densos de escritorio) era poco usable: los
+  formularios ocupaban casi toda la pantalla y tapaban el mapa. Pedido: rediseño
+  completo, muy gráfico, misma funcionalidad, fácil en móvil. Modelo elegido:
+  mapa a pantalla completa + botones flotantes por tarea + hoja enfocada a una
+  sola categoría.
+- **Problema.** Densidad y todo a la vez; el mapa (la superficie principal de la
+  app) quedaba relegado en móvil.
+- **Comportamiento anterior.** `App.svelte` rama `narrow`: `<section class="sheet">`
+  con asa, pestañas **Opciones / Itinerario** y `{@render planContent()}` /
+  `{@render itinContent()}` completos dentro. Estado `sheetTab`, `sheetOpen`.
+- **Comportamiento nuevo.**
+  - Mapa `inset:0` de fondo. Barra flotante inferior `MobileBar.svelte`
+    (scroll horizontal, iconos + badges) con las tareas según fase.
+  - Store `mobileTask` (`stores.js`): hoja activa; `null` = sólo mapa + barra.
+  - Una sola hoja `.m-sheet` (en `App.svelte`) con cabecera (título + ✕), cuerpo
+    con scroll y scrim que la cierra. `{#snippet mobileTaskView(task)}` reparte
+    el contenido **reutilizando los componentes de escritorio**: `SearchPanel` +
+    `BaseResults`, la mini-tarjeta salida+`loadPlan`, hora+`PreferencesBar`,
+    `ItineraryPanel`, y `OptionsPanel` con nueva prop `mobile`.
+  - `OptionsPanel mobile`: CSS oculta todos los `<details>` salvo el de
+    `openOptionGroup`, esconde los `summary` y quita el scroll propio de `.list`.
+    El acordeón deja de verse como tal en móvil.
+  - Al entrar en móvil sin base, se abre la búsqueda automáticamente (una vez).
+  - Un `$effect` en `App.svelte` abre la hoja de la categoría cuyo pin se toca en
+    el mapa (`openOptionGroup` → `mobileTask`).
+  - Barra de viaje compacta `.m-trip` sobre el mapa cuando hay base.
+- **Archivos y funciones.**
+  - `client/src/components/MobileBar.svelte` (nuevo).
+  - `client/src/lib/stores.js`: store `mobileTask`.
+  - `client/src/App.svelte`: rama `narrow` reescrita; snippet `mobileTaskView`;
+    `closeSheet`, `SHEET_TITLES`, `$effect` de sync y de auto-apertura; se
+    eliminan `sheetTab`/`sheetOpen` y estilos `.sheet*`/`.tabs`/`.handle`; nuevos
+    estilos `.m-*`. Import de `fromMin`. Versión visible v1.2.26.
+  - `client/src/components/OptionsPanel.svelte`: prop `mobile`, clase `mobile` en
+    `.groups`, bloque de estilos móvil.
+  - `package.json`, `client/index.html`, `server.js`, `.env.example`,
+    `render.yaml`: versión 1.2.26.
+- **Nuevos invariantes.**
+  - En ≤1024 px el mapa es la superficie principal y siempre visible; la entrada
+    de datos vive en hojas de una sola tarea invocadas desde la barra.
+  - La funcionalidad es la misma que en escritorio (búsqueda, base, preferencias,
+    hora de salida, paradas propuestas y propias, comida/cena/alojamiento,
+    actividades, itinerario descargable).
+  - La rama de escritorio (>1024 px) no cambia. `narrow` sigue en 1024 px.
+- **Qué se conserva.** Motor de plan/itinerario, stores de datos, `selected`/
+  `pools`, `MapCanvas`/`map.js`, todos los componentes de contenido (se
+  reutilizan). El sync pin↔lista sigue por `groupOfOptionId`/`revealOptionId`.
+- **Fallbacks/errores.** Sin geolocalización, «Salgo de» vacío con aviso (igual
+  que escritorio). Si `localStorage` no está, tema oscuro.
+- **Impacto UI.** Sólo móvil/tablet (≤1024 px): navegación completamente nueva.
+- **Impacto APIs.** Ninguno.
+- **Compatibilidad.** Sin cambios de datos/caché.
+- **Validación.** `npm run build` limpio; `npm test` 45/45; `node --check
+  server.js`; captura a 390 px de la pantalla inicial y de la hoja de búsqueda.
+- **Limitaciones que permanecen.** La hoja tiene dos alturas fijas, sin arrastre
+  libre a media altura. La leyenda del mapa sigue oculta en ≤1024 px.
 
 ## v1.2.25 — Comida cerca de las 14:00 y cena cerca de las 20:00, reordenando si hace falta
 
@@ -4630,7 +4697,7 @@ desactualizado, ejecutar `npm run build`.
 | variables sueltas de estado        | stores de `client/src/lib/stores.js`             |
 | `rebuild()`                        | `buildItinerary()` en `lib/itinerary.js` + `$effect` en App.svelte con guarda `rebuildSeq` |
 | `approximateSchedule()`            | `approximateSchedule()` en `lib/itinerary.js`    |
-| `updateViability()` (oculta cards) | `hiddenActivityIds` / `hiddenLunchKeys` (`$derived.by` en App) que `OptionsPanel` aplica |
+| `updateViability()` (ocultaba cards) | `lateActivityIds` / `lateLunchKeys` (`$derived.by` en App) → avisos `lateFinish`/`lateArrival` en `OptionCard`, nunca filtros (desde v1.2.24) |
 | `sortPools()` + `preferenceBonus()`| `applyPreferences()` en `lib/scoring.js` sobre `viewPools` (`$derived`) |
 | `customDurations` (Map global)     | store `customDurations` (Map en writable) + `selectedDuration`/`setCustomDuration` |
 | `bindSelections()`                 | `toggleRouteStop`/`toggleActivity`/`setLunch`/`setDinner`/`setHotel` en stores.js |
@@ -4644,10 +4711,13 @@ posible: ya no es una variable con orden de declaración frágil, es un store.
 
 - Distancia = filtro, ranking = interés (§2.1). El cliente no reordena bases por
   `distanceFromIdealKm`.
-- Comida protegida 12:30–14:30 aunque no haya restaurante (§2.8): lo garantiza
-  `buildItinerary`.
-- Límite del día 22:30 (§2.10, §29): `DAY_END` en `itinerary.js`; las opciones no
-  seleccionadas que lo superan se ocultan, las seleccionadas permanecen.
+- Comida protegida 12:30–14:30 sólo para el **bloque reservado** sin restaurante
+  (§2.8); un restaurante elegido va a su objetivo 14:00 / límite 15:00 y la cena
+  a 20:00 / 21:00, reordenando (§20, §29), sin suelo. Lo hace `orderDay(...,opts)`
+  + `buildItinerary`.
+- Límite del día 22:30 (§2.10, §29): `DAY_END` en `itinerary.js`. Desde v1.2.24
+  **ninguna opción se oculta** por horario/viabilidad en ninguna sección; las que
+  romperían un límite llevan un aviso en la ficha y siguen siendo elegibles.
 - Desplazamientos: columna izquierda = duración (§26): `leftTimelineValue`.
 - "No pude consultar" ≠ "0 resultados" (§2.4): los `.catch` devuelven listas
   vacías sin romper el resto; los fallbacks del backend siguen marcándose
@@ -4699,27 +4769,48 @@ preferencias).
 `/api/metrics/route-detour` (hoy son trazos rectos; el número sí es real);
 clustering de marcadores de destino si el volumen molesta.
 
-## 46.6. Responsive (Fase 3)
+## 46.6. Responsive
 
 Breakpoint `max-width: 1024px` detectado con `window.matchMedia` en `App.svelte`
 (`narrow`).
 
-- **≥1025px:** dos rails flotantes plegables (`.rail--left` / `.rail--right`).
-- **≤1024px:** una hoja inferior `.sheet` con asa (contraer/expandir) y pestañas
-  **Opciones / Itinerario**. El mapa ocupa el resto. Zoom de Leaflet oculto.
+### ≥1025px — escritorio (Fase 3)
 
-`.rail` y `.rail__scroll` llevan `pointer-events: none` (los huecos dejan pasar
-el ratón al mapa); sólo `.rail--left .rail__scroll` y `.rail__scroll > *` (las
-tarjetas) reciben el ratón. Como las tarjetas son `pointer-events: auto` y llegan
-hasta el borde, tapaban el pulgar de la barra de scroll general (barra fina sin
-canal). Por eso `.rail__scroll` y `.sheet__body` llevan **`scrollbar-gutter:
-stable`** (desde v1.2.23): reserva el canal para que la barra sea arrastrable. No
-quitarlo sin otra solución al solape.
+Dos rails flotantes plegables (`.rail--left` / `.rail--right`). `.rail` y
+`.rail__scroll` llevan `pointer-events: none` (los huecos dejan pasar el ratón al
+mapa); sólo `.rail--left .rail__scroll` y `.rail__scroll > *` (las tarjetas)
+reciben el ratón. Como las tarjetas llegan hasta el borde, tapaban el pulgar de
+la barra de scroll: por eso `.rail__scroll` lleva **`scrollbar-gutter: stable`**
+(desde v1.2.23). El contenido de escritorio vive en `{#snippet planContent()}` +
+`{#snippet itinContent()}`.
 
-El contenido no se duplica: `{#snippet planContent()}` (búsqueda → bases →
-preparar día → preferencias → opciones) y `{#snippet itinContent()}` (itinerario)
-se renderizan en el layout activo. Cualquier rework de layout futuro debe
-reutilizar esos snippets.
+### ≤1024px — móvil map-primary (desde v1.2.26)
+
+Sustituye a la hoja con pestañas anterior. El mapa ocupa el viewport completo y
+es la superficie principal. Toda la entrada de datos vive en **una hoja enfocada
+a una sola tarea**, invocada desde una **barra flotante inferior**
+(`MobileBar.svelte`).
+
+- Store `mobileTask` (`stores.js`): tarea/hoja activa. `null` = sólo mapa + barra.
+  Los valores de categoría de opción (`route`/`custom`/`lunch`/`act`/`dinner`/
+  `hotel`) coinciden con `openOptionGroup`; el resto: `search`/`prep`/`tune`/`itin`.
+- `MobileBar` muestra botones con icono + badge según la fase: sin base →
+  «Buscar etapa»; base sin plan → «Preparar el día»; con plan → Ajustes · Paradas
+  · Añadir · Comida · Cena · Dormir · Planes · Itinerario. `open(task)` fija
+  `mobileTask` y sincroniza `openOptionGroup`.
+- La hoja (`.m-sheet` en `App.svelte`) tiene cabecera (título de `SHEET_TITLES` +
+  ✕), cuerpo con scroll y un scrim (`.m-scrim`) que la cierra. `closeSheet()`
+  pone `mobileTask` y `openOptionGroup` a `null`.
+- `{#snippet mobileTaskView(task)}` reparte el contenido reutilizando los
+  componentes de escritorio: `SearchPanel`+`BaseResults` (search), la mini-tarjeta
+  de salida+`loadPlan` (prep), hora de salida+`PreferencesBar` (tune),
+  `ItineraryPanel` (itin) y `OptionsPanel mobile` (categorías de opción — ver §28).
+- Un toque en un pin del mapa hace `openOptionGroup.set(g)`; un `$effect` en
+  `App.svelte` abre la hoja de esa tarea en móvil.
+- Barra de viaje compacta (`.m-trip`) sobre el mapa cuando hay base elegida, con
+  «cambiar» → `mobileTask='search'`.
+- Toda la rama de escritorio queda intacta; `narrow` sigue en 1024 px (una sola
+  ruta móvil para teléfono y tablet).
 
 `client/src/lib/motion.js` (`dur(ms)`, `reducedMotion()`) envuelve las
 transiciones `fly`; con `prefers-reduced-motion` devuelven 0. La regla global de

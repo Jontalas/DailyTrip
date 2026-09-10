@@ -59,6 +59,13 @@ export const focusedRouteStopId = writable(null);
    seleccionadas sólo se dibujan cuando su grupo está desplegado. */
 export const openOptionGroup = writable(null);
 
+/* Móvil (≤1024 px): tarea/hoja enfocada activa. null = sólo mapa + barra.
+   Valores de categoría de opción coinciden con openOptionGroup para que un
+   toque en un pin del mapa abra la hoja correcta.
+   "search" | "prep" | "tune" | "itin" | "route" | "custom" | "lunch" |
+   "act" | "dinner" | "hotel" | null */
+export const mobileTask = writable(null);
+
 /* Al pulsar un marcador del mapa: id de la opción que hay que revelar en la
    lista (abrir su grupo + hacer scroll hasta ella). Se limpia tras revelarla. */
 export const revealOptionId = writable(null);

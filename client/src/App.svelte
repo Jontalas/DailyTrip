@@ -11,11 +11,12 @@
   import OptionsPanel from "./components/OptionsPanel.svelte";
   import ItineraryPanel from "./components/ItineraryPanel.svelte";
   import Progress from "./components/Progress.svelte";
+  import MobileBar from "./components/MobileBar.svelte";
 
   import { api } from "./lib/api.js";
   import { loadCategory } from "./lib/loading.js";
   import { applyPreferences } from "./lib/scoring.js";
-  import { toMin } from "./lib/format.js";
+  import { toMin, fromMin } from "./lib/format.js";
   import { dur } from "./lib/motion.js";
   import { approximateSchedule, isLunchViable, buildItinerary, legKey, DAY_END } from "./lib/itinerary.js";
   import {
@@ -37,7 +38,8 @@
     selectedDuration,
     lunchOptions,
     openOptionGroup,
-    customStops
+    customStops,
+    mobileTask
   } from "./lib/stores.js";
 
   /* ---- Tema ------------------------------------------------------------- */
@@ -74,9 +76,32 @@
   let originText = $state("Málaga");
   let planLoaded = $state(false);
   let narrow = $state(false);
-  let sheetTab = $state("plan"); // narrow: "plan" | "itin"
-  let sheetOpen = $state(true);
   let editingSearch = $state(false); // reabrir búsqueda con el plan ya cargado
+
+  /* ---- Hoja enfocada de móvil ---------------------------------------- */
+  function closeSheet() {
+    mobileTask.set(null);
+    openOptionGroup.set(null);
+  }
+  const SHEET_TITLES = {
+    search: "Etapa: origen y destino", prep: "Preparar el día", tune: "Ajustes del día",
+    route: "Paradas en ruta", custom: "Añadir parada propia", lunch: "Comida",
+    dinner: "Cena", hotel: "Alojamiento", act: "Actividades en destino", itin: "Itinerario del día"
+  };
+  const OPTION_TASKS = ["route", "custom", "lunch", "act", "dinner", "hotel"];
+  // Un toque en un pin del mapa abre su grupo; en móvil eso abre la hoja.
+  $effect(() => {
+    const g = $openOptionGroup;
+    if (!narrow || !g || !OPTION_TASKS.includes(g)) return;
+    if (untrack(() => $mobileTask) !== g) mobileTask.set(g);
+  });
+  // Al entrar en móvil sin base elegida, abrir la búsqueda directamente (una vez).
+  let mobileInit = false;
+  $effect(() => {
+    if (mobileInit || !narrow) return;
+    mobileInit = true;
+    if (!untrack(() => $chosen)) mobileTask.set("search");
+  });
   let mapFocus = $state(false); // adelgazar ambos rails
   let itin = $state({ events: [], endTime: 0, warnings: [] });
   let planSeq = 0;
@@ -492,6 +517,46 @@
   </div>
 {/snippet}
 
+{#snippet mobileTaskView(task)}
+  {#if task === "search"}
+    <SearchPanel onsearch={runSearch} />
+    {#if results.length}
+      <h3 class="m-sub">Finales de etapa</h3>
+      <BaseResults
+        {results}
+        disclaimer={$baseResults.disclaimer}
+        targetName={$searchContext?.target?.name}
+        chosenId={$chosen ? ($chosen.id ?? $chosen.name) : null}
+        onchoose={(b) => { chooseBase(b); editingSearch = false; mobileTask.set("prep"); }}
+      />
+    {/if}
+  {:else if task === "prep"}
+    <div class="prep">
+      <label><span>Hora de salida</span><input type="time" bind:value={$departureTime} /></label>
+      <button class="go" type="button" onclick={loadPlan} disabled={$planning.busy}>
+        {$planning.busy ? "Cargando…" : "Cargar opciones del día"}
+      </button>
+    </div>
+    <Progress steps={$planning.steps} />
+    {#if $planning.status}<p class="status" class:status--error={$planning.error}>{$planning.status}</p>{/if}
+  {:else if task === "tune"}
+    <label class="m-time"><span>Hora de salida</span><input type="time" bind:value={$departureTime} /></label>
+    <PreferencesBar />
+  {:else if task === "itin"}
+    <ItineraryPanel onretry={() => dayRetry++} result={itin} {hasPlan} />
+  {:else}
+    <OptionsPanel
+      mobile
+      pools={planPools}
+      lunchOptions={$lunchOptions}
+      {lateActivityIds}
+      {lateLunchKeys}
+      {categoryState}
+      onretry={(key) => retryCategory(key)}
+    />
+  {/if}
+{/snippet}
+
 <div class="app" class:app--narrow={narrow} class:app--focus={mapFocus && !narrow}>
   <MapCanvas
     dayPlan={currentDay}
@@ -509,7 +574,7 @@
   <header class="brand">
     <div class="brand__mark">
       <span class="dot"></span>
-      Travel Planner <small>v1.2.23</small>
+      Travel Planner <small>v1.2.26</small>
     </div>
     {#if !narrow && hasPlan}
       <button
@@ -532,50 +597,35 @@
   </header>
 
   {#if narrow}
-    <!-- Móvil / tablet: una hoja inferior con pestañas -->
-    <section class="sheet" class:sheet--closed={!sheetOpen} aria-label="Panel de planificación">
-      <div class="sheet__grab">
-        <button
-          class="handle"
-          type="button"
-          onclick={() => (sheetOpen = !sheetOpen)}
-          aria-label={sheetOpen ? "Contraer panel" : "Expandir panel"}
-          aria-expanded={sheetOpen}
-        ></button>
+    <!-- Móvil / tablet: mapa a pantalla completa + barra de tareas + hoja enfocada -->
+    {#if $chosen && !editingSearch}
+      <div class="m-trip">
+        <span class="m-trip__r tnum">
+          <strong>{originText}</strong> → <strong>{$chosen.name}</strong>
+          <span class="m-trip__km">{Math.round(currentDay?.roadKm ?? $chosen.roadKm)} km</span>
+        </span>
+        <button class="m-trip__edit" type="button" onclick={() => { editingSearch = true; mobileTask.set("search"); }}>cambiar</button>
       </div>
-      <div class="tabs" role="tablist">
-        <button
-          role="tab"
-          aria-selected={sheetTab === "plan"}
-          class:on={sheetTab === "plan"}
-          onclick={() => {
-            sheetTab = "plan";
-            sheetOpen = true;
-          }}
-        >
-          Opciones
-        </button>
-        <button
-          role="tab"
-          aria-selected={sheetTab === "itin"}
-          class:on={sheetTab === "itin"}
-          disabled={!$chosen}
-          onclick={() => {
-            sheetTab = "itin";
-            sheetOpen = true;
-          }}
-        >
-          Itinerario
-        </button>
-      </div>
-      <div class="sheet__body scroll-y">
-        {#if sheetTab === "plan"}
-          {@render planContent()}
-        {:else}
-          {@render itinContent()}
-        {/if}
-      </div>
-    </section>
+    {/if}
+
+    <MobileBar
+      hasBase={!!$chosen && !editingSearch}
+      hasPlan={hasPlan}
+      endLabel={hasPlan && itin.endTime ? `~${fromMin(itin.endTime)}` : ""}
+    />
+
+    {#if $mobileTask}
+      <div class="m-scrim" role="presentation" onclick={closeSheet}></div>
+      <section class="m-sheet" aria-label={SHEET_TITLES[$mobileTask] || "Panel"}>
+        <header class="m-sheet__head">
+          <h2>{SHEET_TITLES[$mobileTask] || ""}</h2>
+          <button class="m-sheet__x" type="button" onclick={closeSheet} aria-label="Cerrar">✕</button>
+        </header>
+        <div class="m-sheet__body scroll-y">
+          {@render mobileTaskView($mobileTask)}
+        </div>
+      </section>
+    {/if}
   {:else}
     <!-- Escritorio: dos rails flotantes (los huecos dejan pasar el ratón al mapa) -->
     <aside class="rail rail--left">
@@ -728,75 +778,126 @@
     flex: 0 1 auto;
   }
 
-  /* ---- hoja inferior (móvil / tablet) ---- */
-  .sheet {
+  /* ---- móvil / tablet: mapa a pantalla completa + barra + hoja enfocada ---- */
+  .m-trip {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    top: calc(var(--sp-3) + 42px);
+    z-index: var(--z-overlay);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: 6px 6px 6px 12px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--r-pill);
+    backdrop-filter: blur(var(--glass-blur));
+    box-shadow: var(--sh-2);
+    font-size: var(--fs-12);
+  }
+  .m-trip__r {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-soft);
+  }
+  .m-trip__r strong { color: var(--text); }
+  .m-trip__km { color: var(--text-faint); font-weight: 700; margin-left: 6px; }
+  .m-trip__edit {
+    flex: none;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    padding: 4px 10px;
+    border-radius: var(--r-pill);
+  }
+
+  .m-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: var(--z-panel);
+    background: var(--scrim);
+  }
+  .m-sheet {
     position: absolute;
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: var(--z-panel);
-    max-height: 70vh;
+    z-index: var(--z-overlay);
     display: flex;
     flex-direction: column;
-    background: var(--glass-bg);
+    max-height: 86vh;
+    background: var(--bg-elev);
     border: 1px solid var(--glass-border);
     border-bottom: 0;
     border-radius: var(--r-xl) var(--r-xl) 0 0;
-    backdrop-filter: blur(var(--glass-blur));
     box-shadow: var(--sh-4);
-    transition: transform var(--dur-3) var(--ease-out);
   }
-  .sheet--closed {
-    transform: translateY(calc(100% - 104px));
+  .m-sheet__head {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    padding: 14px 14px 10px;
+    border-bottom: 1px solid var(--line);
   }
-  .sheet__grab {
-    display: grid;
-    place-items: center;
-    padding: var(--sp-2) 0 var(--sp-1);
-  }
-  .handle {
-    width: 44px;
-    height: 5px;
+  .m-sheet__head::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 4px;
     border-radius: var(--r-pill);
     background: var(--line-strong);
   }
-  .tabs {
-    display: flex;
-    gap: var(--sp-2);
-    padding: 0 var(--sp-3) var(--sp-2);
+  .m-sheet__head h2 {
+    margin: 0;
+    font-size: var(--fs-15);
+    font-weight: 800;
   }
-  .tabs button {
-    flex: 1;
-    padding: 8px 10px;
-    font-size: var(--fs-13);
+  .m-sheet__x {
+    flex: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    color: var(--text-soft);
+    font-size: 15px;
     font-weight: 700;
-    color: var(--text-faint);
-    border: 1px solid var(--line);
-    border-radius: var(--r-pill);
-    background: var(--surface);
   }
-  .tabs button.on {
-    color: var(--accent-text);
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  .tabs button:disabled {
-    opacity: 0.5;
-  }
-  .sheet__body {
+  .m-sheet__body {
     flex: 1;
     min-height: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-3);
-    padding: var(--sp-3);
-    padding-bottom: max(var(--sp-3), env(safe-area-inset-bottom));
-    /* mismo motivo que .rail__scroll: que el canal de la barra quede libre */
-    scrollbar-gutter: stable;
+    padding: 12px 14px calc(16px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
-  .sheet__body > :global(.card--fill) {
-    flex: 1;
-    min-height: 55vh;
+  .m-sub {
+    margin: 16px 0 8px;
+    font-size: var(--fs-13);
+    font-weight: 800;
+  }
+  .m-time {
+    display: grid;
+    gap: 4px;
+    margin-bottom: 12px;
+    font-size: var(--fs-12);
+    font-weight: 700;
+    color: var(--text-soft);
+  }
+  .m-time input {
+    height: 44px;
+    padding: 0 var(--sp-3);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    font-size: var(--fs-14);
   }
 
   /* ---- tarjetas (compartidas) ---- */
@@ -807,10 +908,6 @@
     padding: var(--sp-3) var(--sp-3) var(--sp-4);
     backdrop-filter: blur(var(--glass-blur));
     box-shadow: var(--sh-3);
-  }
-  .sheet .card {
-    box-shadow: var(--sh-1);
-    background: var(--surface);
   }
   .card--flush {
     padding: 8px;

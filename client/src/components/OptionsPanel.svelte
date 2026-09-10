@@ -25,7 +25,8 @@
     onretry,
     lunchOptions = [],
     lateActivityIds = new Set(),
-    lateLunchKeys = new Set()
+    lateLunchKeys = new Set(),
+    mobile = false
   } = $props();
 
   let routeSel = $derived(new Set($selected.route.map((x) => x.id)));
@@ -100,7 +101,7 @@
   {/if}
 {/snippet}
 
-<div class="groups" bind:this={listEl}>
+<div class="groups" class:mobile bind:this={listEl}>
   <details class="custom-section" open={$openOptionGroup === "custom"}>
     <summary onclick={(e) => toggle(e, "custom")}>
       <span class="g-title">Paradas personalizadas</span>
@@ -383,4 +384,30 @@
     background: color-mix(in srgb, var(--accent-tint) 55%, transparent);
     font-weight: 600;
   }
+
+  /* ---- móvil: una sola categoría, sin acordeón, objetivos táctiles grandes ---- */
+  .groups.mobile { gap: 0; }
+  .groups.mobile > :global(details:not([open])) { display: none; }
+  .groups.mobile > :global(details[open]) {
+    border: 0;
+    background: transparent;
+    border-radius: 0;
+  }
+  .groups.mobile :global(summary) { display: none; }
+  .groups.mobile .list {
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+    gap: 6px;
+  }
+  .groups.mobile .load-state { padding: 6px 0 10px; }
+  .groups.mobile .custom-help,
+  .groups.mobile .custom-section .custom-add { margin-left: 0; margin-right: 0; }
+  .groups.mobile .custom-row input { height: 44px; font-size: var(--fs-14); }
+  .groups.mobile .mini,
+  .groups.mobile .mini--ghost { height: 44px; font-size: var(--fs-13); }
+  .groups.mobile .none { padding: 13px 12px; font-size: var(--fs-13); }
+  .groups.mobile :global(.row) { padding: 11px 10px; }
+  .groups.mobile :global(.face) { gap: 12px; }
+  .groups.mobile :global(.name) { font-size: var(--fs-14); }
 </style>
