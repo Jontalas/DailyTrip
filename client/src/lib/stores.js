@@ -42,7 +42,7 @@ export const preferences = writable(new Set());
 
 /* Controles */
 export const departureTime = writable("09:30");
-export const theme = writable("system"); // "system" | "light" | "dark"
+export const theme = writable("dark"); // "system" | "light" | "dark" — por defecto oscuro
 
 /* ---- Estado de UI --------------------------------------------------------- */
 export const phase = writable("search"); // search | results | planning | builder

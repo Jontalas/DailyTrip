@@ -1,12 +1,38 @@
 <script>
+  import { onMount } from "svelte";
   import Progress from "./Progress.svelte";
   import { search } from "../lib/stores.js";
+  import { api } from "../lib/api.js";
 
   let { onsearch } = $props();
 
-  let origin = $state("Málaga");
-  let target = $state("Almería");
+  let origin = $state("");
+  let target = $state("");
   let toleranceKm = $state(40);
+
+  // Autocompletar "Salgo de" con la localidad del usuario si el navegador la
+  // da. Nunca pisa lo que el usuario haya escrito mientras tanto.
+  let originTouched = false;
+  let geoStatus = $state(""); // "" | "locating" | "fail"
+
+  onMount(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    geoStatus = "locating";
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        if (originTouched || origin.trim()) { geoStatus = ""; return; }
+        try {
+          const g = await api.geocode({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+          if (!originTouched && !origin.trim() && g?.name) origin = g.name;
+          geoStatus = "";
+        } catch {
+          geoStatus = "fail";
+        }
+      },
+      () => { geoStatus = "fail"; },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 }
+    );
+  });
 
   function submit(e) {
     e.preventDefault();
@@ -21,12 +47,22 @@
 <form class="search" onsubmit={submit}>
   <div class="field field--wide">
     <label for="f-origin">Salgo de</label>
-    <input id="f-origin" bind:value={origin} required autocomplete="off" />
+    <input
+      id="f-origin"
+      bind:value={origin}
+      oninput={() => (originTouched = true)}
+      placeholder={geoStatus === "locating" ? "Detectando tu ubicación…" : "Ciudad de salida"}
+      required
+      autocomplete="off"
+    />
+    {#if geoStatus === "fail"}
+      <span class="hint">No se pudo detectar tu ubicación. Escribe la ciudad de salida.</span>
+    {/if}
   </div>
 
   <div class="field field--wide">
     <label for="f-target">Dirección / destino orientativo</label>
-    <input id="f-target" bind:value={target} required autocomplete="off" />
+    <input id="f-target" bind:value={target} placeholder="Ciudad o zona hacia la que viajas" required autocomplete="off" />
   </div>
 
   <div class="field field--wide">
@@ -52,6 +88,7 @@
 
 <style>
   .tolerance-help {grid-column:1 / -1;font-size:var(--fs-12);color:var(--text-faint);line-height:1.5;}
+  .hint {font-size:var(--fs-12);color:var(--text-faint);line-height:1.4;}
   .search {
     display: grid;
     grid-template-columns: 1fr 1fr;
