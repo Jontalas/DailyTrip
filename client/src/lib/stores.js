@@ -84,6 +84,10 @@ export const customStops = writable([]);
    = comida / cena / alojamiento personalizados. */
 export const mapPickMode = writable(null);
 
+/* Texto de filtro común a TODAS las secciones de opciones (OptionsPanel).
+   Vacío = sin filtro. Una opción seleccionada nunca se oculta. */
+export const optionFilter = writable("");
+
 /* ---- Helpers de duración (portados de app.js) --------------------------- */
 export function recommendedMinutes(item) {
   return Math.max(1, Math.round(Number(item?.durationMin) || 60));
@@ -126,6 +130,7 @@ export function resetPlan() {
   customStops.set([]);
   openOptionGroup.set(null);
   mapPickMode.set(null);
+  optionFilter.set("");
   revealOptionId.set(null);
 }
 

@@ -2420,6 +2420,20 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.41 — Filtro de texto común a todas las secciones de opciones
+
+- **Qué.** Un único campo de búsqueda arriba del acordeón de `OptionsPanel`
+  (`optionFilter` store) filtra a la vez «Paradas personalizadas», «Paradas en
+  ruta», «Comida», «Actividades», «Cena» y «Alojamiento»: sólo se muestran las
+  opciones cuyo nombre / descripción corta / categoría contienen TODAS las
+  palabras escritas (normalizadas, sin acentos). Botón ✕ para limpiar.
+- **Detalles.** Una opción **seleccionada nunca se oculta** aunque no coincida.
+  El contador de cada grupo pasa a «mostradas/total» mientras hay filtro. Cada
+  lista muestra «Ninguna … coincide con «…».» si el filtro deja el grupo vacío.
+  El campo va en un store para que sea el mismo en escritorio y móvil; se limpia
+  en `resetPlan`.
+- **Validación.** `npm test` 61/61; `node --check`; `npm run build` limpio.
+
 ## v1.2.40 — Comida / cena / alojamiento personalizados (como la parada custom)
 
 - **Qué.** En los grupos «Comida», «Cena» y «Alojamiento» hay ahora una fila

@@ -16,9 +16,11 @@
     customStops,
     addCustomStopEnriched,
     removeCustomStop,
-    setCustomMeal
+    setCustomMeal,
+    optionFilter
   } from "../lib/stores.js";
   import { api } from "../lib/api.js";
+  import { normName } from "../lib/scoring.js";
 
   let {
     pools,
@@ -43,6 +45,29 @@
   function lunchIsSelected(item) {
     return $selected.lunch?.id === item.id && $selected.lunch?.lunchPhase === item.lunchPhase;
   }
+
+  // ---- Filtro de texto común a todas las secciones ----
+  // Coincidencia por TODAS las palabras (AND) contra nombre + descripción corta +
+  // categoría. Una opción SELECCIONADA nunca se oculta aunque no coincida.
+  let filterTokens = $derived(normName($optionFilter).split(" ").filter(Boolean));
+  function matches(item) {
+    if (!filterTokens.length) return true;
+    const hay = normName(
+      [item.name, item.shortDesc, (item.categories || [item.category]).filter(Boolean).join(" ")]
+        .filter(Boolean)
+        .join(" ")
+    );
+    return filterTokens.every((t) => hay.includes(t));
+  }
+  const keep = (isSel) => (item) => isSel(item) || matches(item);
+
+  let fCustom = $derived($customStops.filter(keep((x) => routeSel.has(x.id))));
+  let fRoute = $derived(routeOptions.filter(keep((x) => routeSel.has(x.id))));
+  let fLunch = $derived(lunchOptions.filter(keep(lunchIsSelected)));
+  let fAct = $derived((pools.activities || []).filter(keep((x) => actSel.has(x.id))));
+  let fFood = $derived((pools.food || []).filter(keep((x) => $selected.dinner?.id === x.id)));
+  let fLodging = $derived((pools.lodging || []).filter(keep((x) => $selected.hotel?.id === x.id)));
+  const gCount = (shown, total) => ($optionFilter.trim() ? `${shown}/${total}` : `${total}`);
 
 
   // Acordeón: arranca todo colapsado; abrir uno cierra los demás. El grupo
@@ -174,10 +199,23 @@
 {/snippet}
 
 <div class="groups" class:mobile bind:this={listEl}>
+  <div class="opt-filter">
+    <input
+      type="search"
+      class="opt-filter__in"
+      placeholder="Filtrar opciones de todas las secciones…"
+      bind:value={$optionFilter}
+      aria-label="Filtrar por texto las opciones de todas las secciones"
+    />
+    {#if $optionFilter}
+      <button type="button" class="opt-filter__x" onclick={() => optionFilter.set("")} aria-label="Quitar el filtro">✕</button>
+    {/if}
+  </div>
+
   <details class="custom-section" open={$openOptionGroup === "custom"}>
     <summary onclick={(e) => toggle(e, "custom")}>
       <span class="g-title">Paradas personalizadas</span>
-      <span class="g-count">{$customStops.length}</span>
+      <span class="g-count">{gCount(fCustom.length, $customStops.length)}</span>
     </summary>
     <p class="custom-help">Añade cualquier lugar por nombre o en el mapa. Se colocará automáticamente donde encaje mejor en el itinerario.</p>
     <div class="custom-add">
@@ -205,8 +243,10 @@
     </div>
     {#if $customStops.length}
       <div class="list scroll-y">
-        {#each $customStops as item (item.id)}
+        {#each fCustom as item (item.id)}
           <OptionCard {item} mode="multi" custom selected={routeSel.has(item.id)} ontoggle={toggleRouteStop} onremove={(x)=>removeCustomStop(x.id)} />
+        {:else}
+          <p class="empty">Ninguna parada personalizada coincide con «{$optionFilter}».</p>
         {/each}
       </div>
     {/if}
@@ -215,14 +255,14 @@
   <details class="group" data-category="route" open={$openOptionGroup === "route"}>
     <summary onclick={(e) => toggle(e, "route")}>
       <span class="g-title">Paradas en ruta{@render aiDot("route")}</span>
-      <span class="g-count">{allRoute.length}</span>
+      <span class="g-count">{gCount(fRoute.length, allRoute.length)}</span>
     </summary>
 
     {@render loadStatus("route")}
     {@render aiStatus("route")}
 
     <div class="list scroll-y">
-      {#each routeOptions as item (item.id)}
+      {#each fRoute as item (item.id)}
         <OptionCard
           {item}
           mode="multi"
@@ -230,7 +270,8 @@
           ontoggle={toggleRouteStop}
         />
       {:else}
-        {#if categoryState.route?.status === "ok"}<p class="empty">Sin paradas propuestas en el corredor.</p>{/if}
+        {#if $optionFilter.trim() && allRoute.length}<p class="empty">Ninguna parada coincide con «{$optionFilter}».</p>
+        {:else if categoryState.route?.status === "ok"}<p class="empty">Sin paradas propuestas en el corredor.</p>{/if}
       {/each}
     </div>
   </details>
@@ -238,7 +279,7 @@
   <details class="group" open={$openOptionGroup === "lunch"}>
     <summary onclick={(e) => toggle(e, "lunch")}>
       <span class="g-title">Comida <span class="win">12:30–14:30</span></span>
-      <span class="g-count">{lunchOptions.length}</span>
+      <span class="g-count">{gCount(fLunch.length, lunchOptions.length)}</span>
     </summary>
     {@render loadStatus("routeLunch")}
     {@render loadStatus("food")}
@@ -250,7 +291,7 @@
       {#if $selected.lunch?.custom}
         <OptionCard item={$selected.lunch} mode="single" meal="lunch" custom selected phaseLabel="EN DESTINO" onselect={() => setLunch(null)} onremove={() => setLunch(null)} />
       {/if}
-      {#each lunchOptions as item (item.lunchPhase + ":" + item.id)}
+      {#each fLunch as item (item.lunchPhase + ":" + item.id)}
         <OptionCard
           {item}
           mode="single"
@@ -261,6 +302,8 @@
           phaseLabel={item.lunchPhase === "route" ? "EN RUTA" : "EN DESTINO"}
           onselect={(x) => setLunch(x)}
         />
+      {:else}
+        {#if $optionFilter.trim() && lunchOptions.length}<p class="empty">Ningún restaurante coincide con «{$optionFilter}».</p>{/if}
       {/each}
 
     </div>
@@ -269,12 +312,12 @@
   <details class="group" open={$openOptionGroup === "act"}>
     <summary onclick={(e) => toggle(e, "act")}>
       <span class="g-title">Actividades en destino{@render aiDot("activities")}</span>
-      <span class="g-count">{(pools.activities || []).length}</span>
+      <span class="g-count">{gCount(fAct.length, (pools.activities || []).length)}</span>
     </summary>
     <div class="list scroll-y">
       {@render loadStatus("activities")}
       {@render aiStatus("activities")}
-      {#each pools.activities || [] as item (item.id)}
+      {#each fAct as item (item.id)}
         <OptionCard
           {item}
           mode="multi"
@@ -283,7 +326,8 @@
           ontoggle={toggleActivity}
         />
       {:else}
-        {#if categoryState.activities?.status === "ok"}<p class="empty">Sin actividades propuestas.</p>{/if}
+        {#if $optionFilter.trim() && (pools.activities || []).length}<p class="empty">Ninguna actividad coincide con «{$optionFilter}».</p>
+        {:else if categoryState.activities?.status === "ok"}<p class="empty">Sin actividades propuestas.</p>{/if}
       {/each}
     </div>
   </details>
@@ -291,7 +335,7 @@
   <details class="group" open={$openOptionGroup === "dinner"}>
     <summary onclick={(e) => toggle(e, "dinner")}>
       <span class="g-title">Cena</span>
-      <span class="g-count">{(pools.food || []).length}</span>
+      <span class="g-count">{gCount(fFood.length, (pools.food || []).length)}</span>
     </summary>
     {@render loadStatus("food")}
     {@render mealCustomAdd("dinner", "cena")}
@@ -300,8 +344,10 @@
       {#if $selected.dinner?.custom}
         <OptionCard item={$selected.dinner} mode="single" meal="dinner" custom selected onselect={() => setDinner(null)} onremove={() => setDinner(null)} />
       {/if}
-      {#each pools.food || [] as item (item.id)}
+      {#each fFood as item (item.id)}
         <OptionCard {item} mode="single" quality meal="dinner" selected={$selected.dinner?.id === item.id} onselect={(x) => setDinner(x)} />
+      {:else}
+        {#if $optionFilter.trim() && (pools.food || []).length}<p class="empty">Ningún restaurante coincide con «{$optionFilter}».</p>{/if}
       {/each}
     </div>
   </details>
@@ -309,7 +355,7 @@
   <details class="group" open={$openOptionGroup === "hotel"}>
     <summary onclick={(e) => toggle(e, "hotel")}>
       <span class="g-title">Alojamiento</span>
-      <span class="g-count">{(pools.lodging || []).length}</span>
+      <span class="g-count">{gCount(fLodging.length, (pools.lodging || []).length)}</span>
     </summary>
     {@render loadStatus("lodging")}
     {@render mealCustomAdd("hotel", "alojamiento")}
@@ -318,14 +364,45 @@
       {#if $selected.hotel?.custom}
         <OptionCard item={$selected.hotel} mode="single" custom selected onselect={() => setHotel(null)} onremove={() => setHotel(null)} />
       {/if}
-      {#each pools.lodging || [] as item (item.id)}
+      {#each fLodging as item (item.id)}
         <OptionCard {item} mode="single" quality selected={$selected.hotel?.id === item.id} onselect={(x) => setHotel(x)} />
+      {:else}
+        {#if $optionFilter.trim() && (pools.lodging || []).length}<p class="empty">Ningún alojamiento coincide con «{$optionFilter}».</p>{/if}
       {/each}
     </div>
   </details>
 </div>
 
 <style>
+  /* Filtro de texto común a todas las secciones */
+  .opt-filter { position: relative; margin-bottom: 6px; }
+  .opt-filter__in {
+    width: 100%;
+    height: 32px;
+    padding: 0 30px 0 10px;
+    font-size: var(--fs-12);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+  }
+  .opt-filter__in::-webkit-search-cancel-button { display: none; }
+  .opt-filter__x {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+    color: var(--text-faint);
+    border-radius: 5px;
+  }
+  .opt-filter__x:hover { background: var(--line); color: var(--text); }
+  .groups.mobile .opt-filter { margin-bottom: 10px; }
+  .groups.mobile .opt-filter__in { height: 44px; font-size: var(--fs-14); }
+
   .custom-section .custom-add {margin:0 10px 8px;}
   .custom-add--meal {margin:6px 10px 2px;}
   .custom-help {margin:4px 10px;font-size:11px;line-height:1.5;color:var(--text-faint);}
