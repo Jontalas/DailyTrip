@@ -242,6 +242,13 @@
   let tripKm = $derived(Math.round(
     ($chosen ? (currentDay?.roadKm ?? $chosen.roadKm) : $searchContext?.referenceRoute?.roadKm) || 0
   ));
+  // "Colapsar" el formulario a la barra de resumen sólo cuando la búsqueda ha
+  // TERMINADO y hay algo que mostrar: mientras se buscan los finales de etapa el
+  // formulario sigue visible con su progreso; si falla o no hay resultados,
+  // también (para ver el error / el mensaje y poder ajustar).
+  let searchDone = $derived(
+    !editingSearch && !$search.busy && !$search.error && (!!$chosen || results.length > 0)
+  );
 
   /* ---- Búsqueda ------------------------------------------------------- */
   async function runSearch(q) {
@@ -549,7 +556,7 @@
 </script>
 
 {#snippet planContent()}
-  {#if $searchContext && !editingSearch}
+  {#if searchDone}
     <!-- Barra de viaje: ya visible al listar finales de etapa (destino = "Zona
          de …" con la distancia al orientativo); pasa al nombre de la base al elegirla. -->
     <div class="trip-bar">
@@ -621,7 +628,7 @@
 
 {#snippet mobileTaskView(task)}
   {#if task === "search"}
-    {#if $searchContext && !editingSearch && results.length}
+    {#if searchDone && results.length}
       <div class="m-editbar">
         <span class="tnum">{originText} → {tripDest}{#if tripKm} · {tripKm} km{/if}</span>
         <button class="link-btn" type="button" onclick={() => (editingSearch = true)}>cambiar</button>
@@ -680,7 +687,7 @@
   <header class="brand">
     <div class="brand__mark">
       <span class="dot"></span>
-      Travel Planner <small>v1.2.30</small>
+      Travel Planner <small>v1.2.31</small>
     </div>
     {#if !narrow && hasPlan}
       <button
@@ -723,7 +730,7 @@
 
   {#if narrow}
     <!-- Móvil / tablet: mapa a pantalla completa + barra de tareas + hoja enfocada -->
-    {#if $searchContext && !editingSearch}
+    {#if searchDone}
       <div class="m-trip">
         <span class="m-trip__r tnum">
           <strong>{originText}</strong> → <strong>{tripDest}</strong>
@@ -736,7 +743,7 @@
     <MobileBar
       hasBase={!!$chosen && !editingSearch}
       hasPlan={hasPlan}
-      hasSearch={!!$searchContext && !editingSearch}
+      hasSearch={searchDone}
       endLabel={hasPlan && itin.endTime ? `~${fromMin(itin.endTime)}` : ""}
     />
 

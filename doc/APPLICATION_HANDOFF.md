@@ -2411,6 +2411,21 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.31 — El formulario de búsqueda no colapsa hasta conocer los finales de etapa
+
+- **Motivo.** En v1.2.30 el formulario se colapsaba a la barra de resumen en
+  cuanto se resolvía `searchContext` (a mitad de búsqueda), dejando unos segundos
+  con sólo la barra y sin lista de finales de etapa.
+- **Cambio.** Nuevo derivado `searchDone` en `App.svelte`:
+  `!editingSearch && !$search.busy && !$search.error && (!!$chosen || results.length > 0)`.
+  Sustituye a `$searchContext && !editingSearch` en las 4 condiciones de colapso
+  (barra de escritorio, barra `.m-trip`, rama de resultados móvil, prop
+  `hasSearch` de `MobileBar`). Mientras se buscan los finales de etapa el
+  formulario sigue visible con su progreso; si falla o devuelve 0, también.
+- **Validación.** `npm test` 47/47; build sin warnings; captura: en plena
+  búsqueda el formulario sigue visible, y sólo colapsa a
+  «Malaga → Zona de Almería 202 km` cuando aparecen los resultados.
+
 ## v1.2.30 — Preferencias en ruta, más reserva de paradas, carga automática y barra de viaje temprana
 
 - **1. «Qué te apetece hoy» ahora afecta también a las paradas EN RUTA.**
