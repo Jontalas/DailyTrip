@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Travel Planner 1.1.5</title><link rel="stylesheet" href="/styles.css">
+</head>
+<body><main class="shell">
+<header class="hero">
+  <span class="version">v1.1.5 · INTERÉS DE BASE PRIORITARIO</span>
+  <h1>Elige, comprueba y ajusta el día en tiempo real.</h1>
+  <p>Cada opción muestra interés, valor para esta etapa, duración realista y coste de desvío.</p>
+  <div id="providerStatus" class="providers"></div>
+</header>
+
+<section class="panel">
+<h2>1. Buscar final de etapa</h2>
+<form id="searchForm"><div class="grid">
+<label>Salgo de<input id="origin" value="Málaga" required></label>
+<label>Dirección / destino orientativo<input id="target" value="Almería" required></label>
+<label>Distancia ideal<input id="desiredKm" type="number" value="200" min="30"></label>
+<label>Tolerancia ± km<input id="toleranceKm" type="number" value="40" min="5"></label>
+</div><button class="primary" type="submit">Buscar finales de etapa</button></form>
+<div id="searchProgress" class="progress-card hidden"></div><div id="searchStatus" class="status"></div>
+</section>
+
+<section id="results" class="results"></section>
+
+<section id="planSection" class="panel hidden">
+<h2>2. Construir el día</h2><p id="chosenText"></p>
+<div class="controls">
+<label>Hora de salida<input id="departureTime" type="time" value="09:30"></label>
+<button id="loadPlan" class="primary" type="button">Cargar opciones del día</button>
+</div>
+<div id="planProgress" class="progress-card hidden"></div><div id="planStatus" class="status"></div>
+
+
+<section id="preferences" class="preferences hidden">
+  <h3>Qué te apetece hoy</h3>
+  <div class="preference-row">
+    <label><input type="checkbox" value="history"> Historia</label>
+    <label><input type="checkbox" value="nature"> Naturaleza</label>
+    <label><input type="checkbox" value="walk"> Pasear</label>
+    <label><input type="checkbox" value="gastronomy"> Gastronomía</label>
+    <label><input type="checkbox" value="museums"> Museos</label>
+    <label><input type="checkbox" value="views"> Miradores</label>
+  </div>
+</section>
+
+<div id="builder" class="planner-layout hidden">
+  <div class="choices-column">
+
+    <details class="choice-section" open>
+      <summary><span>Paradas en ruta</span><small>puedes elegir varias</small></summary>
+      <div id="routeOptions" class="option-list"></div>
+    </details>
+
+    <details class="choice-section" open>
+      <summary><span>Comida (12:30–14:30)</span><small>una opción compatible con el horario</small></summary>
+      <div id="lunchOptions" class="option-list"></div>
+    </details>
+
+    <details class="choice-section" open>
+      <summary><span>Actividades en destino</span><small>puedes elegir varias</small></summary>
+      <div id="activityOptions" class="option-list"></div>
+    </details>
+
+    <details class="choice-section">
+      <summary><span>Cena</span><small>opcional</small></summary>
+      <div id="dinnerOptions" class="option-list"></div>
+    </details>
+
+    <details class="choice-section">
+      <summary><span>Alojamiento</span><small>una opción</small></summary>
+      <div id="hotelOptions" class="option-list"></div>
+    </details>
+
+  </div>
+
+  <aside class="itinerary-column">
+    <section class="live-plan">
+      <h3>Itinerario actualizado</h3>
+      <div id="timeline"></div>
+      <div id="dayWarnings"></div>
+    </section>
+  </aside>
+</div>
+</section>
+
+<footer>Datos según proveedor · OpenStreetMap contributors cuando se usa OSM.</footer>
+</main><script src="/app.js"></script></body></html>

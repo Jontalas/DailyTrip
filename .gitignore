@@ -1,0 +1,28 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno (usar .env.example como plantilla)
+.env
+.env.local
+.env.*.local
+
+# Build del frontend (se regenera con `npm run build`)
+public/
+
+# Datos locales: caché en disco y capturas
+data/cache.json
+data/cache.json.tmp
+data/*.png
+
+# Artefactos de release
+releases/
+*.zip
+
+# Temporales / capturas de trabajo
+*.tmp
+*.temp
+p2-final.png
+
+# Sistema operativo / editor
+.DS_Store
+Thumbs.db

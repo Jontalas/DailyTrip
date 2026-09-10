@@ -1,0 +1,33 @@
+{
+  "name": "travel-planner",
+  "version": "1.2.23",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "server": "node --watch server.js",
+    "client": "vite",
+    "dev": "concurrently -n api,web -c yellow,magenta \"node --watch server.js\" \"vite\"",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "node --check server.js",
+    "test": "node --test scripts/regression.test.mjs scripts/route-search.test.mjs scripts/day-plan.test.mjs",
+    "test:ui": "node scripts/regression-ui.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^5.2.1",
+    "leaflet": "^1.9.4"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.1.1",
+    "concurrently": "^9.2.1",
+    "playwright": "^1.63.0",
+    "svelte": "^5.39.5",
+    "vite": "^6.3.6"
+  },
+  "description": "Planificador de etapas diarias por carretera. Kilometraje como filtro y ranking exclusivamente por interes de la base; frontend map-forward (Vite + Svelte + Leaflet) desde v1.2.0"
+}

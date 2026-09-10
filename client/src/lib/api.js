@@ -1,0 +1,99 @@
+/* Cliente HTTP de la API. Un método por endpoint, con los MISMOS payloads que
+   usaba public/app.js (v1.1.5). El backend no cambia. */
+
+async function post(url, body) {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const err = new Error(data.error || `Error ${r.status} en ${url}`);
+    err.status = r.status;
+    err.payload = data;
+    throw err;
+  }
+  return data;
+}
+
+const contentQueue=[];
+let contentActive=0;
+function pumpContent() {
+  while(contentActive<2 && contentQueue.length) {
+    const job=contentQueue.shift();contentActive++;
+    post('/api/place/content',{item:job.item}).then(job.resolve,job.reject).finally(()=>{contentActive--;pumpContent();});
+  }
+}
+export const api = {
+  placeContent(item) { return new Promise((resolve,reject)=>{contentQueue.push({item,resolve,reject});pumpContent();}); },
+  planDay(body) { return post('/api/plan/day',body); },
+  async providers() {
+    const r = await fetch("/api/providers");
+    if (!r.ok) throw new Error("No se pudo leer el estado de proveedores");
+    return r.json();
+  },
+
+  searchContext({ origin, target, toleranceKm }) {
+    return post("/api/search/context", { origin, target, toleranceKm });
+  },
+
+  searchCandidates({ origin, target, toleranceKm }) {
+    return post("/api/search/candidates", { origin, target, toleranceKm });
+  },
+
+  planRoute({ origin, destination }) {
+    return post("/api/plan/route", { origin, destination });
+  },
+
+  geocode({ q, lat, lon, place=false }) {
+    return post("/api/geocode", { q, lat, lon, place });
+  },
+
+  optionsRoute({ route, destination }) {
+    return post("/api/options/route", { route, destination });
+  },
+
+  optionsRouteLunch({ route, destination }) {
+    return post("/api/options/route-lunch", { route, destination });
+  },
+
+  optionsActivities({ destination }) {
+    return post("/api/options/activities", { destination });
+  },
+
+  optionsServices({ destination }) {
+    return post("/api/options/services", { destination });
+  },
+
+  async metricsRouteOptions({ route, items }) {
+    const merged = new Map(items.map(x => [x.id, x]));
+    let degraded = false;
+    for (let i = 0; i < items.length; i += 20) {
+      try {
+        const result = await post("/api/metrics/route-options", { route, items: items.slice(i, i + 20) });
+        if (result.source !== "osrm" || result.items?.length !== Math.min(20, items.length-i)) degraded = true;
+        for (const item of result.items || []) if (merged.has(item.id)) merged.set(item.id, { ...merged.get(item.id), ...item });
+      } catch { degraded = true; }
+    }
+    return { items: items.map(x => merged.get(x.id)), degraded };
+  },
+
+  metricsRouteDetour({ origin, stop, destination }) {
+    return post("/api/metrics/route-detour", { origin, stop, destination });
+  },
+
+  planRouteVia({ origin, vias, destination }) {
+    return post("/api/plan/route-via", { origin, vias, destination });
+  },
+
+  async travelSequence({ points }) {
+    const legs = [];
+    for (let i = 0; i < points.length - 1; i += 19) {
+      const result = await post("/api/travel/sequence", { points: points.slice(i, i + 20) });
+      if (result.legs?.length !== Math.min(19, points.length - i - 1)) throw new Error("Desplazamientos incompletos");
+      legs.push(...result.legs.map(leg => ({ ...leg, source: result.source })));
+    }
+    return { legs };
+  }
+};

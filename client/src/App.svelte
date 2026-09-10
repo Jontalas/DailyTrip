@@ -1,0 +1,941 @@
+<script>
+  import { onMount, untrack } from "svelte";
+  import { fly } from "svelte/transition";
+
+  import {daySignature} from "./lib/day-plan.js";
+  import {activeDayRoute,corridorChanged} from "./lib/active-route.js";
+  import MapCanvas from "./components/MapCanvas.svelte";
+  import SearchPanel from "./components/SearchPanel.svelte";
+  import BaseResults from "./components/BaseResults.svelte";
+  import PreferencesBar from "./components/PreferencesBar.svelte";
+  import OptionsPanel from "./components/OptionsPanel.svelte";
+  import ItineraryPanel from "./components/ItineraryPanel.svelte";
+  import Progress from "./components/Progress.svelte";
+
+  import { api } from "./lib/api.js";
+  import { loadCategory } from "./lib/loading.js";
+  import { applyPreferences } from "./lib/scoring.js";
+  import { toMin } from "./lib/format.js";
+  import { dur } from "./lib/motion.js";
+  import { approximateSchedule, isLunchViable, buildItinerary, legKey, DAY_END } from "./lib/itinerary.js";
+  import {
+    providers,
+    searchContext,
+    baseResults,
+    chosen,
+    routeData,
+    activeRoute,
+    pools,
+    selected,
+    customDurations,
+    preferences,
+    departureTime,
+    theme,
+    search,
+    planning,
+    resetPlan,
+    selectedDuration,
+    lunchOptions,
+    openOptionGroup,
+    customStops
+  } from "./lib/stores.js";
+
+  /* ---- Tema ------------------------------------------------------------- */
+  onMount(() => {
+    try {
+      const saved = localStorage.getItem("tp-theme");
+      if (saved) theme.set(saved);
+    } catch {}
+    api.providers().then((p) => providers.set(p)).catch(() => {});
+
+    const mq = window.matchMedia("(max-width: 1024px)");
+    const apply = () => (narrow = mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  });
+
+  $effect(() => {
+    const t = $theme;
+    const root = document.documentElement;
+    if (t === "light" || t === "dark") root.setAttribute("data-theme", t);
+    else root.removeAttribute("data-theme");
+    try {
+      localStorage.setItem("tp-theme", t);
+    } catch {}
+  });
+
+  function cycleTheme() {
+    theme.update((t) => (t === "system" ? "light" : t === "light" ? "dark" : "system"));
+  }
+  let themeLabel = $derived($theme === "system" ? "Auto" : $theme === "light" ? "Claro" : "Oscuro");
+
+  /* ---- Estado local --------------------------------------------------- */
+  let originText = $state("Málaga");
+  let planLoaded = $state(false);
+  let narrow = $state(false);
+  let sheetTab = $state("plan"); // narrow: "plan" | "itin"
+  let sheetOpen = $state(true);
+  let editingSearch = $state(false); // reabrir búsqueda con el plan ya cargado
+  let mapFocus = $state(false); // adelgazar ambos rails
+  let itin = $state({ events: [], endTime: 0, warnings: [] });
+  let planSeq = 0;
+  let legCache = $state(new Map());
+  let dayResult = $state(null);
+  let dayBusy = $state(false);
+  let dayError = $state('');
+  let dayRetry = $state(0);
+  let daySeq = 0;
+  let dayKey = $derived(daySignature({selected:$selected,chosen:$chosen,routeData:$routeData}));
+  let currentDay = $derived(dayResult?.key === dayKey ? dayResult : null);
+  let categoryState = $state({});
+  let catalogRoute = null;
+  let corridorEpoch = 0;
+  let catalogTimer;
+  let metricSeq = 0;
+
+  let hasPlan = $derived(planLoaded);
+  let viewPools = $derived(applyPreferences($pools, [...$preferences]));
+  // Las paradas personalizadas se suman al pool de ruta (no las filtran las
+  // preferencias): las ve la lista, el mapa y el constructor del itinerario.
+  let planPools = $derived({
+    ...viewPools,
+    food: [...(viewPools.food || []), ...($selected.dinner && !(viewPools.food || []).some(x=>x.id===$selected.dinner.id) ? [$selected.dinner] : [])],
+    route: [...(viewPools.route || []), ...$customStops]
+  });
+  let depMin = $derived(toMin($departureTime || "09:30"));
+  let results = $derived($baseResults.results || []);
+
+  /* ---- Búsqueda ------------------------------------------------------- */
+  async function runSearch(q) {
+    planSeq++;
+    daySeq++;
+    categoryState = {};
+    legCache = new Map();
+    planning.set({busy:false,steps:[],status:""});
+    originText = q.origin;
+    baseResults.set([]);
+    chosen.set(null);
+    routeData.set(null);
+    resetPlan();
+    planLoaded = false;
+    editingSearch = false;
+    search.set({
+      busy: true,
+      status: "",
+      error: false,
+      steps: [
+        { label: "Localizar origen y dirección", state: "working" },
+        { label: "Calcular ruta", state: "pending" },
+        { label: "Buscar localidades", state: "pending" },
+        { label: "Comprobar cercanía al destino", state: "pending" }
+      ]
+    });
+
+    try {
+      const ctx = await api.searchContext(q);
+      searchContext.set(ctx);
+      bumpSteps(search, [1, 0], "done");
+      bumpSteps(search, [2], "working");
+
+      const cand = await api.searchCandidates({
+        origin: ctx.origin,
+        target: ctx.target,
+        toleranceKm: ctx.toleranceKm
+      });
+      bumpSteps(search, [2, 3], "done");
+      baseResults.set({ results: cand.results || [], disclaimer: cand.disclaimer || "" });
+      search.update((s) => ({ ...s, busy: false, status: `${(cand.results || []).length} finales de etapa válidos.` }));
+    } catch (e) {
+      search.update((s) => ({
+        ...s,
+        busy: false,
+        error: true,
+        status: e.message || "No se pudo completar la búsqueda.",
+        steps: s.steps.map((st) => (st.state === "working" || st.state === "pending" ? { ...st, state: "error" } : st))
+      }));
+    }
+  }
+
+  function bumpSteps(store, idxs, state) {
+    store.update((s) => ({ ...s, steps: s.steps.map((st, i) => (idxs.includes(i) ? { ...st, state } : st)) }));
+  }
+
+  /* ---- Elegir base -------------------------------------------------- */
+  let routeSeq = 0;
+  async function chooseBase(b) {
+    planSeq++;
+    daySeq++;
+    categoryState = {};
+    legCache = new Map();
+    planning.set({busy:false,steps:[],status:""});
+    chosen.set(b);
+    routeData.set(null);
+    resetPlan();
+    planLoaded = false;
+    editingSearch = false;
+    itin = { events: [], endTime: 0, warnings: [] };
+    sheetOpen = true;
+    sheetTab = "plan";
+
+    // Dibujar YA la ruta origen -> base en el mapa (no se espera a "Cargar
+    // opciones"). Las capas que dependen del plan (paradas, marcadores, línea del
+    // día) siguen sin aparecer hasta pulsar ese botón.
+    const ctx = $searchContext;
+    if (!ctx) return;
+    const mine = ++routeSeq;
+    try {
+      const rd = await api.planRoute({ origin: ctx.origin, destination: { name: b.name, lat: b.lat, lon: b.lon } });
+      if (mine === routeSeq && $chosen === b) routeData.set(rd.route);
+    } catch {
+      /* si falla, se recalcula al cargar el plan */
+    }
+  }
+
+  /* ---- Cargar plan del día --------------------------------------------- */
+  async function loadPlan() {
+    const ch = $chosen;
+    const ctx = $searchContext;
+    if (!ch || !ctx) return;
+    const destination = { name: ch.name, lat: ch.lat, lon: ch.lon };
+    const mine = ++planSeq;
+    categoryState = {};
+
+    resetPlan();
+    planLoaded = false;
+    planning.set({
+      busy: true,
+      status: "",
+      error: false,
+      steps: [
+        { label: "Ruta detallada", state: "working" },
+        { label: "Paradas en ruta", state: "pending" },
+        { label: "Comida en ruta", state: "pending" },
+        { label: "Actividades", state: "pending" },
+        { label: "Restauración y alojamiento", state: "pending" }
+      ]
+    });
+
+    try {
+      // La ruta ya suele estar dibujada desde chooseBase; reutilizarla.
+      const rd = $routeData ? { route: $routeData } : await api.planRoute({ origin: ctx.origin, destination });
+      if (mine !== planSeq) return;
+      routeData.set(rd.route);
+      catalogRoute = rd.route;
+      planLoaded = true;
+      editingSearch = false;
+      bumpSteps(planning, [0], "done");
+      bumpSteps(planning, [1, 2, 3, 4], "working");
+
+      await Promise.all(["route", "routeLunch", "activities", "services"].map(key => retryCategory(key, mine)));
+      if (mine !== planSeq) return;
+      planning.update(s => ({...s, steps:s.steps.map((step,i) => i === 0 ? step : {
+        ...step, state:categoryState[["route","routeLunch","activities","services"][i-1]]?.status === "ok" ? "done" : "error"
+      })}));
+      planning.update((s) => ({ ...s, busy: false, status: "" }));
+      planLoaded = true;
+      editingSearch = false;
+    } catch (e) {
+      if (mine !== planSeq) return;
+      planning.update((s) => ({
+        ...s,
+        busy: false,
+        error: true,
+        status: e.message || "No se pudo preparar el día.",
+        steps: s.steps.map((st) => (st.state !== "done" ? { ...st, state: "error" } : st))
+      }));
+    }
+  }
+
+  async function retryCategory(key, generation = planSeq) {
+    const ch = $chosen, rd = $activeRoute || $routeData;
+    if (!ch || !rd || categoryState[key]?.status === "loading") return;
+    const epoch = corridorEpoch;
+    const destination = {name:ch.name,lat:ch.lat,lon:ch.lon,type:ch.type,population:ch.population};
+    const previous = $pools;
+    categoryState = {...categoryState, [key]:{status:"loading",message:"Buscando y comparando lugares por interés…"}};
+    const requests = {
+      route: async () => {
+        const result = await api.optionsRoute({route:rd,destination});
+        const metrics = await api.metricsRouteOptions({route:rd,items:result.items || []});
+        return {...result, items:metrics.items, degraded:metrics.degraded};
+      },
+      routeLunch: () => api.optionsRouteLunch({route:rd,destination}),
+      activities: () => api.optionsActivities({destination})
+    };
+    let updates = {}, states = [];
+    if (key === "services") {
+      // Una petición compartida conserva estados independientes de comida/hotel.
+      const response = api.optionsServices({destination});
+      const results = await Promise.all(["food","lodging"].map(kind => loadCategory(async () => {
+        const r = await response;
+        return {items:r[kind],source:r.sources?.[kind],status:r.states?.[kind] || r.status,selection:r.selections?.[kind]};
+      }, previous[kind])));
+      ["food","lodging"].forEach((kind,i) => {updates[kind]=results[i].items;});
+      states = results;
+    } else {
+      const result = await loadCategory(requests[key], previous[key]);
+      updates[key] = result.items;
+      states = [result];
+    }
+    if (generation !== planSeq || (["route","routeLunch"].includes(key) && epoch!==corridorEpoch)) return;
+    // Un reintento no elimina selecciones ya hechas.
+    const sel = $selected;
+    const keep = {route:sel.route.filter(x=>!x.custom), activities:sel.activities,
+      routeLunch:sel.lunch?.lunchPhase==="route"?[sel.lunch]:[],
+      food:[sel.lunch?.lunchPhase==="destination"?sel.lunch:null,sel.dinner].filter(Boolean),
+      lodging:sel.hotel?[sel.hotel]:[]};
+    for (const kind of Object.keys(updates)) for (const item of keep[kind])
+      if (!updates[kind].some(x=>x.id===item.id)) updates[kind]=[...updates[kind],item];
+    pools.update(p=>({...p,...updates}));
+    if(key === "services") categoryState={...categoryState,food:states[0],lodging:states[1]};
+    const issue = states.find(x=>x.status!=="ok");
+    categoryState = {...categoryState,[key]:issue || states[0] || {status:"ok",message:""}};
+    if(key==='route' && $activeRoute && rd!==$activeRoute)refreshRouteMetrics($activeRoute,generation);
+  }
+
+  async function refreshRouteMetrics(rd,generation=planSeq) {
+    const mine=++metricSeq;
+    const result=await api.metricsRouteOptions({route:rd,items:$pools.route});
+    if(mine!==metricSeq || generation!==planSeq || rd!==$activeRoute)return;
+    const byId=new Map(result.items.map(x=>[x.id,x]));
+    pools.update(p=>({...p,route:p.route.map(x=>byId.get(x.id)||x)}));
+    if(result.degraded && categoryState.route?.status!=='loading')categoryState={...categoryState,
+      route:{...categoryState.route,status:'degraded',canRetry:true,message:'Algunas métricas del nuevo recorrido son estimadas. Puedes reintentarlas.'}};
+  }
+
+  function refreshCorridor(rd,generation) {
+    if(generation!==planSeq || rd!==$activeRoute)return;
+    catalogRoute=rd;
+    corridorEpoch++;
+    metricSeq++;
+    // Proposals from the old road are not a fallback for a different corridor.
+    // Selected places remain mandatory, including places no longer returned.
+    const sel=$selected;
+    pools.update(p=>({...p,route:sel.route.filter(x=>!x.custom),
+      routeLunch:sel.lunch?.lunchPhase==='route'?[sel.lunch]:[]}));
+    categoryState={...categoryState,route:null,routeLunch:null};
+    void Promise.all(['route','routeLunch'].map(key=>retryCategory(key,generation)));
+  }
+
+  /* ---- Viabilidad temporal (ocultar opciones que no caben) ----------- */
+  let hiddenActivityIds = $derived.by(() => {
+    const set = new Set();
+    const rd = $routeData;
+    const ch = $chosen;
+    if (!rd || !ch) return set;
+    const dm = $customDurations;
+    const sel = $selected;
+    for (const item of $pools.activities || []) {
+      if (sel.activities.some((a) => a.id === item.id)) continue;
+      const end = approximateSchedule({
+        departureMin: depMin,
+        chosen: ch,
+        routeData: rd,
+        selected: sel,
+        durationOf: (x) => selectedDuration(x, dm),
+        legCache,
+        extraActivity: item
+      });
+      if (end > DAY_END) set.add(item.id);
+    }
+    return set;
+  });
+
+  let lateLunchKeys = $derived.by(() => {
+    const set = new Set();
+    const rd = $routeData;
+    if (!rd) return set;
+    const dm = $customDurations;
+    const sel = $selected;
+    for (const item of $lunchOptions) {
+      const key = `${item.lunchPhase}:${item.id}`;
+      if (sel.lunch?.id === item.id && sel.lunch?.lunchPhase === item.lunchPhase) continue;
+      const ok = isLunchViable({
+        item,
+        departureMin: depMin,
+        routeData: rd,
+        selected: sel,
+        chosen: $chosen,
+        legCache,
+        durationOf: (x) => selectedDuration(x, dm)
+      });
+      if (!ok) set.add(key);
+    }
+    return set;
+  });
+
+  // One response supplies the ordering, road geometry and every travel time.
+  $effect(() => {
+    const key=dayKey, retry=dayRetry;
+    const {sel,ch,rd}=untrack(()=>({sel:$selected,ch:$chosen,rd:$routeData}));
+    const mine=++daySeq;
+    const generation=planSeq;
+    clearTimeout(catalogTimer);
+    dayError='';
+    if(!key || !planLoaded) {dayResult=null;dayBusy=false;return;}
+    dayBusy=true;
+    const timer=setTimeout(async()=>{
+      try {
+        const response=await api.planDay({origin:rd.coords[0],chosen:ch,selected:sel});
+        if(mine!==daySeq) return;
+        dayResult={...response,key};
+        const points=[rd.coords[0],...response.stops.map(s=>s.item)];
+        const next=new Map();
+        response.legs.forEach((leg,i)=>next.set(legKey(points[i],points[i+1]),leg));
+        legCache=next;
+        const updated=activeDayRoute(response,rd.coords[0],ch,sel);
+        if(updated){
+          activeRoute.set(updated);
+          if(corridorChanged(catalogRoute,updated))catalogTimer=setTimeout(()=>refreshCorridor(updated,generation),600);
+          else if(categoryState.route?.status!=='loading')void refreshRouteMetrics(updated,generation);
+        }
+      } catch {if(mine===daySeq) dayError='No se pudo calcular la ruta. Los horarios son provisionales.';}
+      finally {if(mine===daySeq) dayBusy=false;}
+    },250);
+    return ()=>clearTimeout(timer);
+  });
+  $effect(() => {
+    const rd=$routeData,ch=$chosen,sel=$selected,dm=$customDurations;
+    if(!rd || !ch || !planLoaded) {itin={events:[],endTime:depMin,warnings:[]};return;}
+    const result=buildItinerary({originName:originText || 'Origen',chosen:ch,routeData:rd,selected:sel,
+      durationOf:item=>selectedDuration(item,dm),departureMin:depMin,legCache:currentDay?legCache:new Map(),orderedStops:currentDay?.stops});
+    result.routingBusy=dayBusy;
+    result.routingError=dayError;
+    result.roadKm=currentDay?.roadKm;
+    result.driveMin=currentDay?.durationMin;
+    result.routingEstimated=currentDay?.source!=='osrm';
+    result.warnings.push(...(currentDay?.accessWarnings || []));
+    if(currentDay?.optimizationSource==='estimated') result.warnings.push('Orden provisional por proximidad: no se pudo consultar la matriz de carreteras.');
+    itin=result;
+  });
+
+</script>
+
+{#snippet planContent()}
+  {#if $chosen && !editingSearch}
+    <!-- Base elegida: barra de viaje + (preparar el día  |  preferencias + opciones) -->
+    <div class="trip-bar">
+      <span class="trip-route tnum">
+        <strong>{originText}</strong> → <strong>{$chosen.name}</strong>
+        <span class="trip-km">{Math.round(currentDay?.roadKm ?? $chosen.roadKm)} km</span>
+      </span>
+      <button class="trip-edit" type="button" onclick={() => (editingSearch = true)}>cambiar</button>
+    </div>
+
+    {#if !hasPlan}
+      <section class="card" in:fly={{ y: 10, duration: dur(220) }}>
+        <h2>Preparar el día</h2>
+        <div class="prep">
+          <label>
+            <span>Hora de salida</span>
+            <input type="time" bind:value={$departureTime} />
+          </label>
+          <button class="go" type="button" onclick={loadPlan} disabled={$planning.busy}>
+            {$planning.busy ? "Cargando…" : "Cargar opciones del día"}
+          </button>
+        </div>
+        <Progress steps={$planning.steps} />
+        {#if $planning.status}<p class="status" class:status--error={$planning.error}>{$planning.status}</p>{/if}
+      </section>
+    {:else}
+      <section class="card card--flush" in:fly={{ y: 10, duration: dur(220) }}>
+        <PreferencesBar />
+        <OptionsPanel
+          pools={planPools}
+          lunchOptions={$lunchOptions}
+          {hiddenActivityIds}
+          {lateLunchKeys}
+          {categoryState}
+          onretry={(key) => retryCategory(key)}
+        />
+      </section>
+    {/if}
+  {:else}
+    <!-- Búsqueda / elección de base -->
+    <section class="card">
+      <div class="card-head">
+        <h2>Buscar final de etapa</h2>
+        {#if $chosen}
+          <button class="link-btn" type="button" onclick={() => (editingSearch = false)}>volver</button>
+        {/if}
+      </div>
+      <SearchPanel onsearch={runSearch} />
+    </section>
+
+    {#if results.length}
+      <section class="card" in:fly={{ y: 12, duration: dur(240) }}>
+        <h2>Finales de etapa</h2>
+        <BaseResults
+          {results}
+          disclaimer={$baseResults.disclaimer}
+          targetName={$searchContext?.target?.name}
+          chosenId={$chosen ? ($chosen.id ?? $chosen.name) : null}
+          onchoose={chooseBase}
+        />
+      </section>
+    {/if}
+  {/if}
+{/snippet}
+
+{#snippet itinContent()}
+  <div class="card card--fill">
+    <ItineraryPanel onretry={() => dayRetry++} result={itin} {hasPlan} />
+  </div>
+{/snippet}
+
+<div class="app" class:app--narrow={narrow} class:app--focus={mapFocus && !narrow}>
+  <MapCanvas
+    dayPlan={currentDay}
+    routeData={$activeRoute || $routeData || $searchContext?.referenceRoute}
+    origin={$searchContext?.origin}
+    chosen={$chosen || $searchContext?.target}
+    theme={$theme}
+    pools={hasPlan ? planPools : null}
+    selected={$selected}
+    openGroup={$openOptionGroup}
+  />
+
+  <header class="brand">
+    <div class="brand__mark">
+      <span class="dot"></span>
+      Travel Planner <small>v1.2.23</small>
+    </div>
+    {#if !narrow && hasPlan}
+      <button
+        class="ghost-btn"
+        type="button"
+        onclick={() => (mapFocus = !mapFocus)}
+        aria-pressed={mapFocus}
+      >
+        {mapFocus ? "Mostrar paneles" : "Enfocar mapa"}
+      </button>
+    {/if}
+    <button
+      class="theme"
+      type="button"
+      onclick={cycleTheme}
+      aria-label={`Tema actual: ${themeLabel}. Pulsa para cambiar.`}
+    >
+      {themeLabel}
+    </button>
+  </header>
+
+  {#if narrow}
+    <!-- Móvil / tablet: una hoja inferior con pestañas -->
+    <section class="sheet" class:sheet--closed={!sheetOpen} aria-label="Panel de planificación">
+      <div class="sheet__grab">
+        <button
+          class="handle"
+          type="button"
+          onclick={() => (sheetOpen = !sheetOpen)}
+          aria-label={sheetOpen ? "Contraer panel" : "Expandir panel"}
+          aria-expanded={sheetOpen}
+        ></button>
+      </div>
+      <div class="tabs" role="tablist">
+        <button
+          role="tab"
+          aria-selected={sheetTab === "plan"}
+          class:on={sheetTab === "plan"}
+          onclick={() => {
+            sheetTab = "plan";
+            sheetOpen = true;
+          }}
+        >
+          Opciones
+        </button>
+        <button
+          role="tab"
+          aria-selected={sheetTab === "itin"}
+          class:on={sheetTab === "itin"}
+          disabled={!$chosen}
+          onclick={() => {
+            sheetTab = "itin";
+            sheetOpen = true;
+          }}
+        >
+          Itinerario
+        </button>
+      </div>
+      <div class="sheet__body scroll-y">
+        {#if sheetTab === "plan"}
+          {@render planContent()}
+        {:else}
+          {@render itinContent()}
+        {/if}
+      </div>
+    </section>
+  {:else}
+    <!-- Escritorio: dos rails flotantes (los huecos dejan pasar el ratón al mapa) -->
+    <aside class="rail rail--left">
+      <div class="rail__scroll scroll-y">
+        {@render planContent()}
+      </div>
+    </aside>
+
+    {#if $chosen}
+      <aside class="rail rail--right" in:fly={{ x: 20, duration: dur(260) }}>
+        <div class="rail__scroll">
+          {@render itinContent()}
+        </div>
+      </aside>
+    {/if}
+  {/if}
+</div>
+
+<style>
+  .app {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .brand {
+    position: absolute;
+    top: var(--sp-4);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: var(--z-overlay);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--r-pill);
+    backdrop-filter: blur(var(--glass-blur));
+    box-shadow: var(--sh-2);
+  }
+  .brand__mark {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-weight: 800;
+    font-size: var(--fs-13);
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+  .app--narrow .brand {
+    top: var(--sp-3);
+    padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3);
+    gap: var(--sp-2);
+  }
+  .app--narrow .brand__mark {
+    font-size: var(--fs-12);
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-tint);
+  }
+  .theme,
+  .ghost-btn {
+    padding: 5px 12px;
+    font-size: var(--fs-12);
+    font-weight: 700;
+    color: var(--text-soft);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+  }
+  .theme:hover,
+  .ghost-btn:hover {
+    color: var(--text);
+  }
+  .ghost-btn[aria-pressed="true"] {
+    background: var(--accent-tint);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ---- rails de escritorio ----
+     El contenedor del rail NO captura el ratón: sólo lo hacen las tarjetas.
+     Así los huecos entre/bajo tarjetas son mapa útil (pan, zoom, selección). */
+  .rail {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: var(--z-panel);
+    width: var(--rail-w);
+    display: flex;
+    padding: var(--sp-4);
+    transition: transform var(--dur-3) var(--ease-out);
+    pointer-events: none;
+  }
+  .rail--left {
+    left: 0;
+  }
+  .rail--right {
+    right: 0;
+    justify-content: flex-end;
+    width: var(--rail-w-wide);
+  }
+  .app--focus .rail--left {
+    transform: translateX(calc(-1 * var(--rail-w) + 4px));
+  }
+  .app--focus .rail--right {
+    transform: translateX(calc(var(--rail-w-wide) - 4px));
+  }
+  .rail__scroll {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 2px;
+    pointer-events: none;
+    /* Reservar el canal de la barra de scroll: con scrollbar fina (overlay) las
+       tarjetas hijas (pointer-events:auto) llegaban hasta el borde y tapaban el
+       pulgar de la barra, así que no se podía arrastrar el scroll general. */
+    scrollbar-gutter: stable;
+  }
+  .rail__scroll > :global(*) {
+    max-width: 100%;
+  }
+  .rail--left .rail__scroll {
+    pointer-events: auto;
+  }
+  /* las tarjetas sí reciben el ratón */
+  .rail__scroll > :global(*) {
+    pointer-events: auto;
+  }
+  .rail--right .rail__scroll {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    /* reservar la esquina inferior derecha para la leyenda: el itinerario
+       llega como mucho hasta aquí y hace scroll interno si no cabe */
+    padding-bottom: 210px;
+  }
+  .rail--right .card--fill {
+    flex: 0 1 auto;
+  }
+
+  /* ---- hoja inferior (móvil / tablet) ---- */
+  .sheet {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-panel);
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-bottom: 0;
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    backdrop-filter: blur(var(--glass-blur));
+    box-shadow: var(--sh-4);
+    transition: transform var(--dur-3) var(--ease-out);
+  }
+  .sheet--closed {
+    transform: translateY(calc(100% - 104px));
+  }
+  .sheet__grab {
+    display: grid;
+    place-items: center;
+    padding: var(--sp-2) 0 var(--sp-1);
+  }
+  .handle {
+    width: 44px;
+    height: 5px;
+    border-radius: var(--r-pill);
+    background: var(--line-strong);
+  }
+  .tabs {
+    display: flex;
+    gap: var(--sp-2);
+    padding: 0 var(--sp-3) var(--sp-2);
+  }
+  .tabs button {
+    flex: 1;
+    padding: 8px 10px;
+    font-size: var(--fs-13);
+    font-weight: 700;
+    color: var(--text-faint);
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+    background: var(--surface);
+  }
+  .tabs button.on {
+    color: var(--accent-text);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .tabs button:disabled {
+    opacity: 0.5;
+  }
+  .sheet__body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-3);
+    padding-bottom: max(var(--sp-3), env(safe-area-inset-bottom));
+    /* mismo motivo que .rail__scroll: que el canal de la barra quede libre */
+    scrollbar-gutter: stable;
+  }
+  .sheet__body > :global(.card--fill) {
+    flex: 1;
+    min-height: 55vh;
+  }
+
+  /* ---- tarjetas (compartidas) ---- */
+  .card {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--r-md);
+    padding: var(--sp-3) var(--sp-3) var(--sp-4);
+    backdrop-filter: blur(var(--glass-blur));
+    box-shadow: var(--sh-3);
+  }
+  .sheet .card {
+    box-shadow: var(--sh-1);
+    background: var(--surface);
+  }
+  .card--flush {
+    padding: 8px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--r-md);
+    backdrop-filter: blur(var(--glass-blur));
+    box-shadow: var(--sh-3);
+  }
+  .card--flush :global(.prefs) {
+    padding: 4px 6px 9px;
+    margin-bottom: 7px;
+    border-bottom: 1px solid var(--line);
+  }
+  .card--fill {
+    height: auto;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: var(--sp-3);
+  }
+
+  .card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--sp-2);
+  }
+  h2 {
+    font-size: var(--fs-14);
+    font-weight: 800;
+    margin-bottom: var(--sp-3);
+    letter-spacing: 0.01em;
+  }
+  .card-head h2 {
+    margin-bottom: var(--sp-3);
+  }
+  .link-btn {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .link-btn:hover {
+    text-decoration: underline;
+  }
+
+  /* ---- barra de viaje (plan cargado) ---- */
+  .trip-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: 7px 12px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--r-pill);
+    backdrop-filter: blur(var(--glass-blur));
+    box-shadow: var(--sh-2);
+    font-size: var(--fs-12);
+  }
+  .trip-route {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-soft);
+  }
+  .trip-route strong {
+    color: var(--text);
+  }
+  .trip-km {
+    color: var(--text-faint);
+    font-weight: 700;
+    margin-left: 6px;
+  }
+  .trip-edit {
+    flex: none;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    padding: 3px 9px;
+    border-radius: var(--r-pill);
+  }
+  .trip-edit:hover {
+    background: var(--accent-tint);
+  }
+
+  .prep {
+    display: flex;
+    gap: var(--sp-3);
+    align-items: end;
+    flex-wrap: wrap;
+  }
+  .prep label {
+    display: grid;
+    gap: 3px;
+    font-size: var(--fs-12);
+    font-weight: 700;
+    color: var(--text-soft);
+  }
+  .prep input {
+    height: 42px;
+    padding: 0 var(--sp-3);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+  }
+  .go {
+    height: 42px;
+    padding: 0 var(--sp-4);
+    background: var(--accent);
+    color: var(--accent-text);
+    border-radius: var(--r-sm);
+    font-weight: 700;
+    box-shadow: var(--sh-1);
+  }
+  .go:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+  .go:disabled {
+    opacity: 0.65;
+  }
+  .status {
+    margin-top: var(--sp-3);
+    font-size: var(--fs-13);
+    color: var(--text-soft);
+  }
+  .status--error {
+    color: var(--danger);
+  }
+
+  @media (max-width: 1180px) {
+    :root {
+      --rail-w: 360px;
+    }
+  }
+</style>

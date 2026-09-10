@@ -1,0 +1,343 @@
+/* ============================================================================
+   Travel Planner — sistema de diseño "Travel cálido"  (v1.2.0)
+   Tokens globales: color (claro/oscuro), tipografía, espaciado, radios,
+   sombras, superficies glass y motion. Los componentes sólo consumen var().
+   ============================================================================ */
+
+:root {
+  color-scheme: light dark;
+
+  /* -- Paleta base: neutros arena ------------------------------------------- */
+  --sand-50:  #faf6f0;
+  --sand-100: #f3ece1;
+  --sand-200: #e7dccb;
+  --sand-300: #d6c6ad;
+  --sand-400: #b9a684;
+  --sand-500: #927f5f;
+  --sand-600: #6b5b41;
+  --sand-700: #4c4030;
+  --sand-800: #322a20;
+  --sand-900: #1f1a14;
+
+  /* -- Acento cálido: ámbar / terracota ----------------------------------- */
+  --amber-300: #f4b678;
+  --amber-400: #ec9a54;
+  --amber-500: #dd7a3b;   /* acción primaria (claro) */
+  --amber-600: #c25e2c;
+  --amber-700: #9c4a24;
+
+  /* -- Apoyo: verde bosque (validez / positivo) --------------------------- */
+  --forest-400: #4f9e6b;
+  --forest-500: #2f7b4c;
+  --forest-600: #245f3c;
+
+  /* -- Escala de datos: coste de desvío (verde -> ámbar -> rojo) ---------- */
+  --data-good: #3f9d5c;
+  --data-mid:  #e0a63c;
+  --data-high: #d3524a;
+
+  /* -- Roles semánticos (TEMA CLARO por defecto) ------------------------- */
+  --bg:            var(--sand-50);
+  --bg-elev:       #fffdf9;
+  --surface:       #fffdf9;
+  --surface-2:     var(--sand-100);
+  --surface-sunk:  var(--sand-100);
+  --text:          #211a11;
+  --text-soft:     #574c3b;
+  --text-faint:    #726650;
+  --line:          rgba(60, 46, 26, 0.14);
+  --line-strong:   rgba(60, 46, 26, 0.26);
+
+  --accent:        var(--amber-500);
+  --accent-hover:  var(--amber-600);
+  --accent-text:   #ffffff;
+  --accent-tint:   rgba(221, 122, 59, 0.12);
+  --accent-ring:   rgba(221, 122, 59, 0.40);
+
+  --positive:      var(--forest-500);
+  --positive-tint: rgba(47, 123, 76, 0.12);
+  --warning:       #a86a1f;
+  --warning-tint:  rgba(168, 106, 31, 0.14);
+  --danger:        #b23b32;
+  --danger-tint:   rgba(178, 59, 50, 0.12);
+
+  /* Panel flotante (glass) sobre el mapa */
+  --glass-bg:      rgba(255, 253, 249, 0.82);
+  --glass-border:  rgba(255, 255, 255, 0.55);
+  --glass-blur:    16px;
+
+  --scrim:         rgba(24, 18, 10, 0.42);
+
+  /* -- Tipografía --------------------------------------------------------- */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+               Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-num:  "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --fs-11: 0.6875rem;
+  --fs-12: 0.75rem;
+  --fs-13: 0.8125rem;
+  --fs-14: 0.875rem;
+  --fs-15: 0.9375rem;
+  --fs-16: 1rem;
+  --fs-18: 1.125rem;
+  --fs-22: 1.375rem;
+  --fs-28: 1.75rem;
+  --fs-36: 2.25rem;
+  --fs-46: 2.875rem;
+
+  --lh-tight: 1.15;
+  --lh-snug:  1.35;
+  --lh-body:  1.55;
+
+  /* -- Espaciado (escala de 4) ----------------------------------------------- */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.25rem;
+  --sp-6: 1.5rem;
+  --sp-8: 2rem;
+  --sp-10: 2.5rem;
+  --sp-12: 3rem;
+
+  /* -- Radios ----------------------------------------------------------------- */
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+
+  /* -- Sombras (cálidas, no grises) ---------------------------------------- */
+  --sh-1: 0 1px 2px rgba(46, 32, 14, 0.10),
+          0 1px 3px rgba(46, 32, 14, 0.06);
+  --sh-2: 0 4px 12px rgba(46, 32, 14, 0.12),
+          0 2px 4px rgba(46, 32, 14, 0.07);
+  --sh-3: 0 12px 32px rgba(38, 26, 12, 0.18),
+          0 4px 10px rgba(38, 26, 12, 0.10);
+  --sh-4: 0 24px 60px rgba(30, 20, 8, 0.28),
+          0 8px 20px rgba(30, 20, 8, 0.14);
+
+  /* -- Motion -------------------------------------------------------------- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+  --dur-4: 480ms;
+
+  /* -- Layout ------------------------------------------------------------- */
+  --rail-w: 396px;
+  --rail-w-wide: 400px;
+  --z-map: 0;
+  --z-panel: 400;
+  --z-overlay: 800;
+  --z-toast: 1200;
+}
+
+/* ---------------------------------------------------------------------------
+   TEMA OSCURO — por sistema o por data-theme="dark"
+   --------------------------------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:            #14110c;
+    --bg-elev:       #1c1811;
+    --surface:       #211c14;
+    --surface-2:     #2a2419;
+    --surface-sunk:  #17130d;
+    --text:          #f5eddf;
+    --text-soft:     #c7bba4;
+    --text-faint:    #92866d;
+    --line:          rgba(245, 237, 223, 0.12);
+    --line-strong:   rgba(245, 237, 223, 0.24);
+
+    --accent:        #ef9a5c;
+    --accent-hover:  #f4ad74;
+    --accent-text:   #24160c;
+    --accent-tint:   rgba(239, 154, 92, 0.16);
+    --accent-ring:   rgba(239, 154, 92, 0.45);
+
+    --positive:      #57b47d;
+    --positive-tint: rgba(87, 180, 125, 0.16);
+    --warning:       #e0a851;
+    --warning-tint:  rgba(224, 168, 81, 0.16);
+    --danger:        #e57368;
+    --danger-tint:   rgba(229, 115, 104, 0.16);
+
+    --glass-bg:      rgba(28, 24, 17, 0.78);
+    --glass-border:  rgba(245, 237, 223, 0.10);
+    --scrim:         rgba(0, 0, 0, 0.55);
+
+    --sh-1: 0 1px 2px rgba(0, 0, 0, 0.40);
+    --sh-2: 0 4px 12px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.30);
+    --sh-3: 0 12px 32px rgba(0, 0, 0, 0.55), 0 4px 10px rgba(0, 0, 0, 0.35);
+    --sh-4: 0 24px 60px rgba(0, 0, 0, 0.65), 0 8px 20px rgba(0, 0, 0, 0.40);
+  }
+}
+
+/* Toggle manual explícito (gana en ambos sentidos) */
+:root[data-theme="dark"] {
+  --bg:            #14110c;
+  --bg-elev:       #1c1811;
+  --surface:       #211c14;
+  --surface-2:     #2a2419;
+  --surface-sunk:  #17130d;
+  --text:          #f5eddf;
+  --text-soft:     #c7bba4;
+  --text-faint:    #92866d;
+  --line:          rgba(245, 237, 223, 0.12);
+  --line-strong:   rgba(245, 237, 223, 0.24);
+
+  --accent:        #ef9a5c;
+  --accent-hover:  #f4ad74;
+  --accent-text:   #24160c;
+  --accent-tint:   rgba(239, 154, 92, 0.16);
+  --accent-ring:   rgba(239, 154, 92, 0.45);
+
+  --positive:      #57b47d;
+  --positive-tint: rgba(87, 180, 125, 0.16);
+  --warning:       #e0a851;
+  --warning-tint:  rgba(224, 168, 81, 0.16);
+  --danger:        #e57368;
+  --danger-tint:   rgba(229, 115, 104, 0.16);
+
+  --glass-bg:      rgba(28, 24, 17, 0.78);
+  --glass-border:  rgba(245, 237, 223, 0.10);
+  --scrim:         rgba(0, 0, 0, 0.55);
+
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --sh-2: 0 4px 12px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.30);
+  --sh-3: 0 12px 32px rgba(0, 0, 0, 0.55), 0 4px 10px rgba(0, 0, 0, 0.35);
+  --sh-4: 0 24px 60px rgba(0, 0, 0, 0.65), 0 8px 20px rgba(0, 0, 0, 0.40);
+}
+
+/* ---------------------------------------------------------------------------
+   Reset / base
+   --------------------------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden; /* la app gestiona su propio scroll interno */
+}
+
+h1, h2, h3, h4, p, figure { margin: 0; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+img { max-width: 100%; display: block; }
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 0;
+  background: none;
+}
+
+input, select, textarea { font: inherit; color: inherit; }
+
+[hidden] { display: none !important; }
+
+:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+/* Scrollbars discretas dentro de los paneles */
+.scroll-y {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.scroll-y::-webkit-scrollbar { width: 10px; }
+.scroll-y::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--r-pill);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* Utilidad de número tabular para horas / métricas */
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+/* Tooltip (acción use:tip) — nodo único adjunto a <body> */
+.tip-bubble {
+  position: fixed;
+  z-index: var(--z-toast);
+  max-width: 260px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  background: var(--text);
+  color: var(--bg);
+  font-size: var(--fs-12);
+  line-height: 1.4;
+  font-weight: 500;
+  box-shadow: var(--sh-3);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+.tip-bubble.is-on {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ---------------------------------------------------------------------------
+   Leaflet — integración con el tema (map-forward)
+   --------------------------------------------------------------------------- */
+.leaflet-container {
+  background: var(--surface-sunk);
+  font: inherit;
+}
+.leaflet-control-attribution {
+  background: var(--glass-bg) !important;
+  color: var(--text-faint) !important;
+  backdrop-filter: blur(6px);
+  border-radius: var(--r-pill) 0 0 0;
+  font-size: var(--fs-11);
+}
+.leaflet-control-attribution a { color: var(--text-soft) !important; }
+.leaflet-bar {
+  border: 0 !important;
+  box-shadow: var(--sh-2) !important;
+  border-radius: var(--r-md) !important;
+  overflow: hidden;
+}
+.leaflet-bar a {
+  background: var(--glass-bg) !important;
+  color: var(--text) !important;
+  backdrop-filter: blur(var(--glass-blur));
+  border-bottom-color: var(--line) !important;
+}
+.leaflet-bar a:hover { background: var(--surface-2) !important; }
+
+/* En móvil/tablet el zoom es táctil: el control estorba junto a la marca */
+@media (max-width: 1024px) {
+  .leaflet-control-zoom { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
