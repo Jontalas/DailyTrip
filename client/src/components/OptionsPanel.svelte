@@ -107,6 +107,12 @@
   {/if}
 {/snippet}
 
+{#snippet aiDot(kind)}
+  {#if aiState?.[kind] === "working"}
+    <span class="g-ai" title="Consultando a la IA para completar y reordenar esta lista…" aria-label="Consultando a la IA"></span>
+  {/if}
+{/snippet}
+
 {#snippet aiStatus(kind)}
   {#if aiState?.[kind] === "working"}
     <p class="ai-status ai-status--busy" role="status" aria-live="polite">
@@ -159,7 +165,7 @@
 
   <details class="group" data-category="route" open={$openOptionGroup === "route"}>
     <summary onclick={(e) => toggle(e, "route")}>
-      <span class="g-title">Paradas en ruta</span>
+      <span class="g-title">Paradas en ruta{@render aiDot("route")}</span>
       <span class="g-count">{allRoute.length}</span>
     </summary>
 
@@ -209,7 +215,7 @@
 
   <details class="group" open={$openOptionGroup === "act"}>
     <summary onclick={(e) => toggle(e, "act")}>
-      <span class="g-title">Actividades en destino</span>
+      <span class="g-title">Actividades en destino{@render aiDot("activities")}</span>
       <span class="g-count">{(pools.activities || []).length}</span>
     </summary>
     <div class="list scroll-y">
@@ -280,6 +286,26 @@
     background: var(--accent-tint);
   }
   .ai-status--done { color: var(--text-faint); }
+
+  /* Punto pulsante junto al título del grupo: la IA está trabajando esa lista
+     en segundo plano (visible aunque el grupo esté plegado). Sólo escritorio:
+     en móvil las cabeceras de grupo no se muestran. */
+  .g-ai {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: g-ai-pulse 1.5s ease-out infinite;
+  }
+  @keyframes g-ai-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+    70% { box-shadow: 0 0 0 6px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .g-ai { animation: none; }
+  }
   .ai-spin {
     flex: none;
     width: 12px;

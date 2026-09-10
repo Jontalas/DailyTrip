@@ -2,7 +2,7 @@
   /* Barra flotante inferior para móvil/tablet (≤1024 px). El mapa manda; cada
      botón abre una hoja enfocada a una sola tarea. La funcionalidad completa
      de escritorio se reparte entre estas tareas. */
-  import { selected, customStops, preferences, mobileTask, openOptionGroup } from "../lib/stores.js";
+  import { selected, customStops, preferences, mobileTask, openOptionGroup, aiCuration } from "../lib/stores.js";
 
   let { hasBase = false, hasPlan = false, hasSearch = false, endLabel = "" } = $props();
 
@@ -27,12 +27,12 @@
     return [
       { task: "search", icon: "🗺️", label: "Etapa", badge: "" },
       { task: "tune", icon: "⚙️", label: "Ajustes", badge: $preferences.size || "" },
-      { task: "route", icon: "📍", label: "Paradas", badge: routeCount || "" },
+      { task: "route", icon: "📍", label: "Paradas", badge: routeCount || "", aiKey: "route" },
       { task: "custom", icon: "➕", label: "Añadir", badge: $customStops.length || "" },
       { task: "lunch", icon: "🍴", label: "Comida", badge: $selected.lunch ? "✓" : "" },
       { task: "dinner", icon: "🌙", label: "Cena", badge: $selected.dinner ? "✓" : "" },
       { task: "hotel", icon: "🛏️", label: "Dormir", badge: $selected.hotel ? "✓" : "" },
-      { task: "act", icon: "⭐", label: "Planes", badge: $selected.activities.length || "" },
+      { task: "act", icon: "⭐", label: "Planes", badge: $selected.activities.length || "", aiKey: "activities" },
       { task: "itin", icon: "🧭", label: endLabel || "Itinerario", badge: "" }
     ];
   });
@@ -48,6 +48,9 @@
       aria-pressed={$mobileTask === b.task}
       onclick={() => open(b.task)}
     >
+      {#if b.aiKey && $aiCuration[b.aiKey] === "working"}
+        <span class="ai-pulse" title="Consultando a la IA…" aria-label="Consultando a la IA para completar y reordenar esta lista"></span>
+      {/if}
       <span class="ic" aria-hidden="true">{b.icon}</span>
       <span class="lb">{b.label}</span>
       {#if b.badge !== ""}<span class="bd">{b.badge}</span>{/if}
@@ -124,5 +127,26 @@
   .btn.on .bd {
     background: var(--accent-text);
     color: var(--accent);
+  }
+
+  /* Punto pulsante: la IA está completando/reordenando esa lista en segundo plano. */
+  .ai-pulse {
+    position: absolute;
+    top: 4px;
+    left: 5px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: ai-pulse 1.5s ease-out infinite;
+  }
+  .btn.on .ai-pulse { background: var(--accent-text); }
+  @keyframes ai-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); }
+    70% { box-shadow: 0 0 0 7px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ai-pulse { animation: none; }
   }
 </style>

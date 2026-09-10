@@ -2420,6 +2420,19 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.36 — Indicador de consulta a la IA visible sin abrir la sección
+
+- **Motivo.** El aviso de v1.2.35 sólo se veía dentro de la hoja/grupo abierto.
+  Hacía falta señal desde el mapa (móvil) y con el grupo plegado (escritorio).
+- **Cambios (sólo UI).**
+  - `MobileBar.svelte`: punto pulsante `.ai-pulse` en los botones «📍 Paradas» y
+    «⭐ Planes» mientras `aiCuration.route` / `aiCuration.activities === "working"`.
+  - `OptionsPanel.svelte`: snippet `aiDot(kind)` — punto pulsante `.g-ai` junto al
+    título de los grupos «Paradas en ruta» y «Actividades», visible aunque el
+    acordeón esté plegado (escritorio; en móvil las cabeceras no se muestran).
+  - Ambos respetan `prefers-reduced-motion` (sin animación).
+- **Validación.** `npm test` 58/58; `node --check`; `npm run build` limpio.
+
 ## v1.2.35 — La IA se sigue consultando en segundo plano y actualiza las listas al llegar
 
 - **Motivo.** Gemini flash sufre picos de "high demand": la vía en línea (tope de
