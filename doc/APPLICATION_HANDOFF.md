@@ -849,6 +849,21 @@ están en la entrada v1.2.13 de §43, que sustituye las reglas anteriores.
 - La variedad se usa para ordenar/repartir, no para expulsar lugares reales.
   Ya no hay tope por familia, por arranque de nombre, por número de playas ni
   distancia mínima entre dos visitas distintas.
+- **Garantía de hitos (v1.2.28).** El corredor Málaga→Almería produjo 389
+  candidatos válidos para ~50 plazas: el recorte por interés dejaba fuera hitos
+  como la Cueva de Nerja (agravado por el bug de categoría `"natural"`→50).
+  Ahora, además de las ~`roadKm/4` mejores por interés, se incluye cualquier
+  candidato **ya descubierto** del corredor que sea un hito indiscutible
+  (`isRouteLandmark`: artículo de Wikipedia en ≥10 idiomas o ≥8 000 visitas/20
+  días). Sin tope. `coverage.landmarks` los cuenta.
+- **`corridorLandmarks` (v1.2.28).** Pasada dedicada a mejor esfuerzo: geosearch
+  por círculo a lo largo de la ruta → recuento de idiomas/visitas → sólo los
+  hitos → fichas completas → al pool de candidatos. Se ejecuta antes de la
+  búsqueda general. **No es garantía absoluta**: si Wikipedia está limitando el
+  ritmo (429 → cooldown 60 s), se salta. El resultado se cachea al alcanzar el
+  objetivo, así que a partir de la primera búsqueda satisfactoria el hito queda
+  fijado. El proveedor `all` de Wikipedia dejó de usar `gsbbox` (fallaba
+  "toobig") y ahora usa círculo `gscoord`+`gsradius=10 km`. Pasada rápida 30 → 45.
 - El enriquecimiento añade información; no elimina POI reales por carecer de foto.
 - `coverage.outcome`: `target-reached` / `sources-exhausted` / `incomplete`.
   Sólo el segundo significa que se han agotado sin error las fuentes disponibles
@@ -958,14 +973,20 @@ Por defecto:
 Valores relevantes:
 
 ```text
-museum                       88
-historic / sights / cultural 84
-attraction                   80
-viewpoint                    76
-nature / park                74
-restaurant                   70
-accommodation                65
+museum                        88
+historic / sights / cultural  84
+attraction                    80
+viewpoint                     76
+natural* / park / garden /    74   (* "natural", cave/cueva/gruta — regex /natur|park|garden|cave|cueva|gruta/)
+restaurant                    70
+accommodation                 65
 ```
+
+**Ojo (arreglado en v1.2.28):** la rama de naturaleza probaba `includes("nature")`,
+pero la categoría real es **`"natural"`** (y `natural.cave`, `natural.mountain`…).
+Cuevas, sierras, cabos y cascadas caían al 50 por defecto y quedaban fuera del top
+de paradas en ruta. Ahora se detectan con regex. Mismo arreglo en `interestScore()`
+y `durationRange()`.
 
 ### Valoración
 
@@ -2377,6 +2398,63 @@ Al crearla:
 ---
 
 # 43. CHANGELOG DE CONTINUIDAD
+
+## v1.2.28 — Hitos de alto interés en las paradas en ruta
+
+- **Motivo.** En Málaga→Almería no se ofrecía la Cueva de Nerja. El corredor da
+  ~389 candidatos válidos para ~50 plazas y el recorte por interés dejaba fuera
+  hitos de primer nivel.
+- **Causas.**
+  1. **Fallo de puntuación.** `scoreBreakdown()`/`interestScore()`/`durationRange()`
+     probaban `includes("nature")`, pero la categoría real de cuevas, sierras,
+     cabos y cascadas es `"natural"` (y `natural.cave`, `natural.mountain`…): caían
+     al valor de categoría por defecto (50) en vez de 74.
+  2. **Recorte duro top-N.** `selectRoutePlaces(items, roadKm/4)` se queda con las
+     ~50 mejores por interés, sin excepción para hitos indiscutibles.
+  3. **Descubrimiento poco fiable.** La pasada profunda de Wikipedia usaba
+     `gsbbox` con una caja de ±15 km → MediaWiki responde `"toobig"` y esa
+     aportación quedaba en nada. Y Wikipedia limita el ritmo (429) al servidor
+     durante la búsqueda, que entonces congela sus consultas 60 s.
+- **Cambios.**
+  - `server.js`: las tres funciones de puntuación detectan naturaleza con regex
+    `/natur|park|garden|cave|cueva|gruta/` (una cueva famosa pasa de 50 a 74).
+    Pasada rápida de Wikipedia 30 → **45** artículos. Proveedor `all` de
+    Wikipedia: `gsbbox` (roto) → círculo `gscoord`+`gsradius=10000`.
+  - `lib/route-search.js`: nueva `isRouteLandmark(x, {minLanglinks:10,
+    minPageviews:8000})` — notabilidad indiscutible por señales de Wikipedia.
+  - **Garantía de hitos** en `discoverRouteStops`: tras `selectRoutePlaces(ranked,
+    target)` se añaden los candidatos que pasan `isRouteLandmark` y no estaban ya
+    incluidos, ordenando por interés. **Sin tope**: la barra de notabilidad es el
+    límite. `coverage.landmarks` los cuenta. Coste cero (opera sobre lo ya hallado).
+  - **`corridorLandmarks(index)`** (nueva, `server.js`): pasada dedicada y a
+    **mejor esfuerzo** que recorre la ruta con geosearch por círculo, cuenta
+    idiomas/visitas en lote, filtra por `isRouteLandmark` y trae fichas sólo de
+    los pocos hitos. Se ejecuta antes de la búsqueda general para tener prioridad
+    en la cola de Wikipedia; si hay cooldown activo espera como mucho ~40 s y si
+    no, se salta (los hitos son un extra, no cuelgan la búsqueda). Sus resultados
+    entran en el pool de candidatos.
+  - Caché `routeStops:v10:` → **`v25:`**.
+- **Nuevos invariantes.**
+  - Las categorías de naturaleza (`natural*`, cueva, cabo, sierra, cascada)
+    puntúan como naturaleza (74), no como el 50 por defecto.
+  - Un candidato **ya descubierto** dentro del corredor con `wikiLanglinks ≥ 10`
+    o `wikiPageviews ≥ 8000` aparece siempre entre las paradas en ruta (garantía).
+- **Limitación conocida (no es un "siempre" absoluto).** El descubrimiento de un
+  hito nuevo depende de que Wikipedia no esté limitando el ritmo en ese momento.
+  Cuando lo hace, `corridorLandmarks` se salta y sólo actúan el arreglo de
+  puntuación y la garantía sobre lo ya hallado. El resultado se **cachea** al
+  alcanzar el objetivo, así que a partir de la primera búsqueda satisfactoria de
+  una ruta el hito queda fijado. Para un "siempre" real haría falta una lista
+  curada de hitos por zona (pendiente).
+- **Qué se conserva.** Objetivo `roadKm/4`, filtro de corredor ±10 km, márgenes de
+  origen/destino, honestidad de `coverage.outcome`, resto de la búsqueda.
+- **Impacto.** La primera búsqueda de cada ruta nueva puede tardar hasta ~40 s más
+  si Wikipedia está en cooldown; luego va a caché. Sin proveedores nuevos. Caché
+  `routeStops` invalidada.
+- **Validación.** `npm test` 46/46 (nueva: `isRouteLandmark`); `node --check
+  server.js`; `npm run build`. Verificado contra servidor local que, sin
+  rate-limit, `corridorLandmarks` recupera la Cueva de Nerja y ~60 hitos más del
+  corredor; con rate-limit el arreglo de puntuación por sí solo ya la sube mucho.
 
 ## v1.2.27 — Móvil: la hoja de opciones no tapa el mapa
 

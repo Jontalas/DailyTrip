@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {routeGeometryIndex,mergeRoutePlaces,selectRoutePlaces,searchRoutePlaces,pagedPlaces,subdividedPlaces} from '../lib/route-search.js';
+import {routeGeometryIndex,mergeRoutePlaces,selectRoutePlaces,searchRoutePlaces,pagedPlaces,subdividedPlaces,isRouteLandmark} from '../lib/route-search.js';
 import {loadCategory} from '../client/src/lib/loading.js';
 const place=(id,extra={})=>({id,name:`Torre de ${id}`,lat:36,lon:-4+Number(id)*.0001,routeProgressPct:Number(id)%100,verified:true,source:'wikipedia',...extra});
 test('la variedad y proximidad no impiden alcanzar 50 lugares distintos',()=>{
@@ -59,6 +59,13 @@ test('una caja saturada se subdivide; no se presenta el límite de Wikipedia com
   let calls=0;const pages=[];
   for await(const page of subdividedPlaces([1,0,0,1],async()=>({items:[place(++calls)],saturated:calls===1})))pages.push(page);
   assert.equal(calls,5);assert.equal(pages[0].complete,false);assert.equal(pages.at(-1).complete,true);
+});
+test('isRouteLandmark: notabilidad por idiomas o visitas de Wikipedia',()=>{
+  assert.equal(isRouteLandmark({wikiLanglinks:20}),true);
+  assert.equal(isRouteLandmark({wikiPageviews:50000}),true);
+  assert.equal(isRouteLandmark({wikiLanglinks:5,wikiPageviews:3000}),false);
+  assert.equal(isRouteLandmark({wikiLanglinks:20,verified:false}),false);
+  assert.equal(isRouteLandmark(null),false);
 });
 test('la interfaz diferencia mínimo alcanzado, fuentes agotadas y fallo; conserva el avance',async()=>{
   const coverage={target:50,outcome:'incomplete'};

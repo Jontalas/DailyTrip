@@ -9,7 +9,7 @@ import { routeOptionMetrics } from './lib/route-option-metrics.js';
 import { routeDay } from "./lib/day-routing.js";
 import { destinationScale, topInterest, latestPopulation } from "./lib/destination-options.js";
 import { placeContent } from "./lib/place-content.js";
-import { routeStopTarget, routeGeometryIndex, mergeRoutePlaces, selectRoutePlaces, searchRoutePlaces, pagedPlaces, subdividedPlaces } from "./lib/route-search.js";
+import { routeStopTarget, routeGeometryIndex, mergeRoutePlaces, selectRoutePlaces, searchRoutePlaces, pagedPlaces, subdividedPlaces, isRouteLandmark } from "./lib/route-search.js";
 import { fileURLToPath } from "node:url";
 
 // Node puede usar un almacén distinto al de Windows. Añadir las CA del sistema
@@ -36,7 +36,7 @@ const OVERPASS_ENDPOINTS=[
 
 const GEOAPIFY_KEY=(process.env.GEOAPIFY_API_KEY||"").trim();
 const GOOGLE_KEY=(process.env.GOOGLE_PLACES_API_KEY||"").trim();
-const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.27 (personal-use)";
+const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.28 (personal-use)";
 const DEBUG_EXTERNAL=process.env.DEBUG_EXTERNAL==="1";
 const debug=(...a)=>{if(DEBUG_EXTERNAL)console.warn(...a);};
 
@@ -241,7 +241,7 @@ function durationFor(category=""){
   if(category.includes("viewpoint"))return 35;
   if(category.includes("zoo")||category.includes("aquarium"))return 150;
   if(category.includes("theme_park")||category.includes("amusement"))return 240;
-  if(category.includes("nature")||category.includes("park"))return 75;
+  if(/natur|park|garden|\bcave\b|cueva|gruta/.test(category))return 75;
   if(category.includes("historic")||category.includes("sights"))return 60;
   if(category.includes("restaurant")||category.includes("cafe"))return 85;
   return 60;
@@ -258,6 +258,7 @@ function durationRange(category="",recommended=null){
   else if(c.includes("zoo")||c.includes("aquarium"))[min,max]=[120,210];
   else if(c.includes("theme_park")||c.includes("amusement"))[min,max]=[180,300];
   else if(c.includes("nature_reserve"))[min,max]=[90,180];
+  else if(/natur|\bcave\b|cueva|gruta/.test(c))[min,max]=[45,120];
   else if(c.includes("park")||c.includes("garden"))[min,max]=[45,90];
   else if(c.includes("historic")||c.includes("sights")||c.includes("cultural"))[min,max]=[45,90];
   else if(c.includes("restaurant")||c.includes("cafe")||c.includes("food"))[min,max]=[70,100];
@@ -280,7 +281,9 @@ function scoreBreakdown(item){
   else if(c.includes("historic")||c.includes("sights")||c.includes("cultural"))category=84;
   else if(c.includes("attraction"))category=80;
   else if(c.includes("viewpoint"))category=76;
-  else if(c.includes("nature")||c.includes("park"))category=74;
+  // "natural" (cuevas, sierras, cabos, cascadas…) NO contiene "nature": sin este
+  // arreglo caían al 50 por defecto y quedaban fuera del top de paradas en ruta.
+  else if(/natur|park|garden|\bcave\b|cueva|gruta/.test(c))category=74;
   else if(c.includes("restaurant"))category=70;
   else if(c.includes("accommodation"))category=65;
 
@@ -344,7 +347,7 @@ function interestScore(item){
   if(c.includes("museum"))score+=18;
   else if(c.includes("historic")||c.includes("sights")||c.includes("cultural"))score+=15;
   else if(c.includes("viewpoint"))score+=12;
-  else if(c.includes("nature")||c.includes("park"))score+=11;
+  else if(/natur|park|garden|\bcave\b|cueva|gruta/.test(c))score+=11;
   else if(c.includes("attraction"))score+=13;
   else if(c.includes("restaurant"))score+=8;
   else if(c.includes("accommodation"))score+=7;
@@ -1277,6 +1280,80 @@ const WIKI_SETTLEMENT_LEAD=/\bes (una|un)\s+(localidad|municipio|pedan[ií]a|ent
 // Nombre de Geoapify que en realidad es una vía o dirección, no un sitio.
 const ROUTE_ADDRESS_LIKE=/^(calle|avda|avenida|camino|carretera|ctra|plaza|pza|cuesta|paseo|urbanizaci[oó]n|pol[ií]gono|traves[ií]a|ronda|glorieta|v[ií]a|barriada|partida|sendero|vereda|pista|autov[ií]a|rotonda)\b/i;
 
+// Pasada dedicada de HITOS del corredor, a MEJOR ESFUERZO. Se ejecuta antes de
+// la búsqueda general de POI para tener prioridad en la cola de Wikipedia:
+//  1) geosearch por círculo (gscoord + gsradius=10 km; la caja gsbbox grande
+//     falla con "toobig") a lo largo de la ruta -> pageids, sin detalle.
+//  2) recuento de idiomas/visitas en lote (50 ids/consulta, props mínimas).
+//  3) filtra por notabilidad indiscutible (isRouteLandmark) -> pocos.
+//  4) fichas completas sólo de esos pocos, que entran en el pool de candidatos.
+// Sube mucho la probabilidad de que un sitio como la Cueva de Nerja aparezca,
+// pero NO es una garantía absoluta: si Wikipedia está limitando el ritmo (429,
+// que congela sus consultas 60 s), este barrido se salta y no aporta.
+async function corridorLandmarks(index){
+  // Vía `wikiJson`: cola global educada (evita provocar más 429). Si un 429
+  // previo dejó cooldown activo, se aguarda como mucho ~40 s; pasado eso se
+  // devuelve lo que haya (los hitos son un extra, no deben colgar la búsqueda).
+  const wq=async params=>{
+    const wait=wikiCooldownUntil-Date.now();
+    if(wait>0){ if(wait>40000) return null; await sleep(wait+300); }
+    try{ return await wikiFetch(params); }catch{ return null; }
+  };
+  const step=Math.max(12,index.total/16);
+  const points=[];
+  for(let km=0;km<=index.total;km+=step)points.push(index.pointAt(km));
+  const seen=new Map(); // pageid -> {title,lat,lon}
+  for(const p of points){
+    const geo=await wq({action:"query",format:"json",formatversion:"2",list:"geosearch",
+      gsnamespace:"0",gscoord:`${p.lat}|${p.lon}`,gsradius:"10000",gslimit:"100"});
+    for(const h of geo?.query?.geosearch||[]){
+      if(h.title&&!WIKI_SKIP.test(h.title)&&!seen.has(h.pageid))seen.set(h.pageid,{title:h.title,lat:h.lat,lon:h.lon});
+    }
+  }
+  const inCorridor=[...seen.entries()].filter(([,v])=>index.locate(v).distanceToRouteKm<=10);
+  if(!inCorridor.length)return [];
+  const notable=[];
+  for(let i=0;i<inCorridor.length;i+=50){
+    const ids=inCorridor.slice(i,i+50).map(([id])=>id);
+    const d=await wq({action:"query",format:"json",formatversion:"2",
+      pageids:ids.join("|"),prop:"langlinks|pageviews",lllimit:"500",pvipdays:"20"});
+    for(const pg of d?.query?.pages||[]){
+      const langs=(pg.langlinks||[]).length;
+      const views=pg.pageviews?Object.values(pg.pageviews).reduce((s,n)=>s+(Number(n)||0),0):0;
+      if(isRouteLandmark({wikiLanglinks:langs,wikiPageviews:views}))
+        notable.push({pageid:pg.pageid,langs,views,...seen.get(pg.pageid)});
+    }
+  }
+  if(!notable.length)return [];
+  const out=[];
+  for(let i=0;i<notable.length;i+=20){
+    const chunk=notable.slice(i,i+20);
+    const d=await wq({action:"query",format:"json",formatversion:"2",redirects:"1",
+      pageids:chunk.map(n=>n.pageid).join("|"),prop:"extracts|pageimages|pageterms|info",
+      exintro:"1",explaintext:"1",exsentences:"3",piprop:"thumbnail",pithumbsize:"640",inprop:"url"});
+      for(const pg of d?.query?.pages||[]){
+        const meta=notable.find(n=>n.pageid===pg.pageid);if(!meta)continue;
+        const extract=String(pg.extract||"").replace(/\s+/g," ").trim();
+        const shortDesc=(pg.terms?.description||[])[0]||"";
+        if(!extract&&!shortDesc)continue;
+        if(!wikiIsVisitablePlace(shortDesc,extract))continue;
+        const cat=wikiCategoryFromText(`${shortDesc} ${extract}`);
+        out.push({
+          id:`wiki:${pg.pageid}`,name:pg.title,lat:meta.lat,lon:meta.lon,
+          category:cat,categories:[cat],
+          description:extract||capFirst(shortDesc),shortDesc:shortDesc?capFirst(shortDesc):"",
+          durationMin:durationFor(cat),website:"",openingHours:"",cuisine:"",
+          wikipediaUrl:pg.fullurl||`https://es.wikipedia.org/?curid=${pg.pageid}`,
+          infoUrl:pg.fullurl||"",imageUrl:pg.thumbnail?.source||"",
+          imageAttribution:pg.thumbnail?"Wikipedia (CC)":"",
+          wikiPageviews:meta.views,wikiLanglinks:meta.langs,wikiBytes:Number(pg.length)||0,
+          rating:null,userRatingCount:null,source:"wikipedia",verified:true
+        });
+      }
+  }
+  return out;
+}
+
 // Consultas simultáneas del mismo trayecto comparten trabajo; no hay caché
 // persistente de una búsqueda incompleta. La geometría identifica el corredor.
 const routeSearchInFlight=new Map();
@@ -1285,7 +1362,7 @@ async function robustRouteStops(route,destination){
   const index=routeGeometryIndex(route.coords);
   const target=routeStopTarget(route.roadKm ?? index.total);
   const fingerprint=createHash("sha256").update(JSON.stringify({coords:route.coords,destination,target})).digest("hex").slice(0,24);
-  const key=`routeStops:v10:${fingerprint}`;
+  const key=`routeStops:v25:${fingerprint}`;
   const fresh=cacheGet(key);
   // Un resultado bajo el objetivo nunca evita una nueva búsqueda.
   if(fresh?.data?.coverage?.outcome==="target-reached" && fresh.data.items.length>=target)
@@ -1327,11 +1404,15 @@ async function discoverRouteStops(route,destination,index,target,key){
   };
   const providers=[{
     name:"wikipedia",
-    quick:center=>wikiNearby(center,10000,30,{detailCache:details}),
-    all:center=>subdividedPlaces(boundsFor(center),async bounds=>{
-      const items=await wikiNearby(center,10000,500,{full:true,bounds,detailCache:details});
-      return {items,saturated:items.saturated};
-    })
+    quick:center=>wikiNearby(center,10000,45,{detailCache:details}),
+    // Pasada profunda por círculo (gscoord + gsradius=10000, gslimit=500). NO
+    // usar gsbbox: la caja de ±15 km supera el límite de MediaWiki ("toobig") y
+    // dejaba la aportación profunda de Wikipedia en nada. El círculo de 10 km por
+    // centro, con centros cada ~10 km, cubre el corredor ±10 km.
+    async *all(center){
+      const items=await wikiNearby(center,10000,500,{full:true,detailCache:details});
+      yield {items,complete:!items.saturated};
+    }
   }];
   if(GEOAPIFY_KEY)providers.push({
     name:"geoapify",
@@ -1357,15 +1438,20 @@ async function discoverRouteStops(route,destination,index,target,key){
       return {items,saturated:items.rawCount>=20};
     })
   });
+  // Hitos del corredor PRIMERO (prioridad en la cola de Wikipedia), luego la
+  // búsqueda general de POI. Ambos pasan por `prepare` (mismo filtro de
+  // corredor/márgenes y deduplicación) antes de puntuarse juntos.
+  const corridorHits=await corridorLandmarks(index).catch(()=>[]);
   const found=await searchRoutePlaces({centers:index.centers,providers,target,prepare,pause:()=>sleep(200)});
-  let items=enrichInterest(found.candidates,destination.name);
-  // El enriquecimiento mejora las fichas, no expulsa lugares reales por carecer
-  // de una foto o por compartir categoría con otra parada cercana.
-  // Rank all discovered candidates with the same evidence. Extended editorial
-  // details load on demand, so the number of rejected candidates cannot turn
-  // the initial search into hundreds of unnecessary detail requests.
-  items=selectRoutePlaces(enrichInterest(items,destination.name),target);
-  const coverage={...found.coverage,returned:items.length,centers:index.centers.length,rejected,providers:providers.map(p=>p.name)};
+  const ranked=enrichInterest(prepare([...corridorHits,...found.candidates]),destination.name);
+  const primary=selectRoutePlaces(ranked,target);
+  // Garantía de hitos: un sitio de notabilidad indiscutible dentro del corredor
+  // (p. ej. la Cueva de Nerja) se incluye SIEMPRE, aunque no entre en el
+  // objetivo de ~1 parada / 4 km. Sin tope: la barra de notabilidad ya limita.
+  const kept=new Set(primary.map(x=>x.id));
+  const landmarks=ranked.filter(x=>!kept.has(x.id) && isRouteLandmark(x));
+  let items=[...primary,...landmarks].sort((a,b)=>(b.interestScore||0)-(a.interestScore||0));
+  const coverage={...found.coverage,returned:items.length,landmarks:landmarks.length,centers:index.centers.length,rejected,providers:providers.map(p=>p.name)};
   const result={status:coverage.outcome==="incomplete"?"partial":"ok",items,coverage,source:[...new Set(items.map(x=>x.source))].join("+")||"none"};
   if(coverage.outcome==="target-reached")cacheSet(key,result);
   if(!items.length && coverage.outcome==="incomplete"){
@@ -1768,4 +1854,4 @@ app.post("/api/plan/route-via",async(req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Travel Planner 1.2.27 en http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`Travel Planner 1.2.28 en http://localhost:${PORT}`));
