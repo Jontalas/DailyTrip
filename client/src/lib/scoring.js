@@ -34,12 +34,24 @@ export function preferenceBonus(item, prefs) {
   return bonus;
 }
 
+/* Nota base para ordenar una opción: si la IA la puntuó (`aiInterest`, 0–100),
+   esa es la base; si no, el `interestScore` calculado. Así la lista queda
+   ordenada "por lo que recomienda la IA" y las preferencias sólo la matizan.
+   Lo que la IA no menciona conserva su sitio por interés (no se oculta). */
+export function baseInterest(item) {
+  return item.aiInterest != null && Number.isFinite(Number(item.aiInterest))
+    ? Number(item.aiInterest)
+    : (item.interestScore || 50);
+}
+
 export function adjustedInterest(item, prefs) {
-  return Math.max(1, Math.min(100, (item.interestScore || 50) + preferenceBonus(item, prefs)));
+  return Math.max(1, Math.min(100, baseInterest(item) + preferenceBonus(item, prefs)));
 }
 
 export function adjustedStageValue(item, prefs) {
-  const base = item.stageValue ?? item.interestScore ?? 50;
+  const base = item.aiInterest != null && Number.isFinite(Number(item.aiInterest))
+    ? Number(item.aiInterest)
+    : (item.stageValue ?? item.interestScore ?? 50);
   return Math.max(1, Math.min(100, base + preferenceBonus(item, prefs)));
 }
 

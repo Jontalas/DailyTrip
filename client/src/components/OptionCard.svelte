@@ -89,7 +89,14 @@
 
   $effect(()=>{if(open && !details && !contentBusy && !contentError) loadContent();});
 
-  let interest = $derived(Math.round(item.adjustedInterest ?? item.interestScore ?? 0));
+  let interest = $derived(Math.round(item.interestScore ?? item.adjustedInterest ?? 0));
+  // Nota que la IA otorga a este lugar (0–100), si la puntuó. La lista se ordena
+  // priorizando esta nota; el tooltip muestra el motivo que da la IA.
+  let aiScore = $derived(
+    item.aiInterest != null && Number.isFinite(Number(item.aiInterest))
+      ? Math.round(Number(item.aiInterest))
+      : null
+  );
   let dur = $derived(selectedDuration(item, $customDurations));
   let recMin = $derived(item.durationRangeMin ?? Math.round(recommendedMinutes(item) * 0.7));
   let recMax = $derived(item.durationRangeMax ?? Math.round(recommendedMinutes(item) * 1.3));
@@ -192,6 +199,12 @@
       <b class="name" title={item.name}>{item.name}</b>
       {#if custom}<span class="tag tag--custom">personalizada</span>{/if}
       {#if phaseLabel}<span class="tag">{phaseLabel === "EN RUTA" ? "ruta" : "destino"}</span>{/if}
+      {#if aiScore != null}
+        <span
+          class="ai-badge"
+          use:tip={item.aiReason ? `IA: ${item.aiReason}` : `Interés estimado por la IA (0–100). La lista se ordena por esta nota.`}
+        >IA {aiScore}</span>
+      {/if}
       {#if det}
         <span
           class="pill pill--{det}"
@@ -450,6 +463,18 @@
     color: var(--surface);
     background: var(--text);
     border-color: var(--text);
+  }
+  .ai-badge {
+    flex: none;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+    padding: 3px 6px;
+    border-radius: var(--r-pill);
+    color: var(--accent-text, #fff);
+    background: var(--accent);
+    cursor: help;
+    white-space: nowrap;
   }
   .rm {
     flex: none;

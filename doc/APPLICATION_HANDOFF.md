@@ -2420,6 +2420,31 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.34 — El orden de las listas obedece a la nota de la IA y esa nota se ve
+
+- **Motivo.** v1.2.33 ordenaba las listas por la IA **en el servidor**, pero el
+  cliente las re-ordenaba: `applyPreferences` (en `App.svelte` →
+  `viewPools`) reordena TODOS los pools por `adjustedInterest` = `interestScore`
+  + bonus de preferencias, ignorando `aiInterest`. Además la nota de la IA no se
+  mostraba en ningún sitio.
+- **Cambios.**
+  - `client/src/lib/scoring.js`: nueva `baseInterest(item)` = `aiInterest` si la
+    IA puntuó ese lugar, si no `interestScore`. `adjustedInterest` y
+    `adjustedStageValue` parten de ella, así que `applyPreferences` ordena por la
+    nota de la IA (las preferencias sólo la matizan). Lo que la IA no menciona
+    conserva su sitio por `interestScore` (no se oculta).
+  - `client/src/components/OptionCard.svelte`: badge **«IA NN»** en la cabecera
+    de la ficha cuando `item.aiInterest != null`; el tooltip muestra
+    `item.aiReason` (el motivo que da la IA). El «interés NN» de la subline
+    vuelve a ser el `interestScore` propio, para poder comparar ambos.
+  - `lib/ai-curator.js`: `normalizeResult` devuelve también `reasons`
+    (`{normName: motivo}`), además de `ranking`.
+  - `server.js`: `aiRouteSuggestions` propaga `reasons`; el `.map` de
+    `discoverRouteStops` y de `robustDestinationContent` fija `aiReason` en cada
+    item (propio o por nombre). `routeStops:v27:`→`v28:`, `content:v9:`→`v10:`.
+- **Validación.** `npm test` 57/57 (nuevo caso de `applyPreferences` con
+  `aiInterest`); `node --check`; `npm run build`.
+
 ## v1.2.33 — Curación por IA (Gemini, aditiva) + lista de paradas en ruta sin tope
 
 - **Motivo.** (1) La lista de la izquierda de "Paradas en ruta" mostraba sólo las
@@ -5179,8 +5204,12 @@ funciona igual con Wikipedia/Geoapify/OSM: la IA **suma**, no es un requisito.
 - **Orden de las listas.** `aiRank(item,ranking)` = nota de la IA si opinó sobre
   ese nombre (por `normName`), si no `interestScore`. `applyAiRanking` /
   `selectRoutePlaces(...,rankScore)` / `topInterest(...,scorer)` ordenan por esa
-  nota. **Lo que la IA no menciona NO se oculta ni se hunde**: conserva su lugar
-  por `interestScore` (principio §2.x "nunca ocultar opciones").
+  nota **en el servidor**; en el **cliente**, `scoring.js:baseInterest()` hace lo
+  mismo para que `applyPreferences` (que reordena todos los pools) respete la
+  nota de la IA. **Lo que la IA no menciona NO se oculta ni se hunde**: conserva
+  su lugar por `interestScore` (principio §2.x "nunca ocultar opciones").
+- **La nota se muestra.** Cada item lleva `aiInterest` (0-100) y `aiReason`;
+  `OptionCard` pinta un badge «IA NN» con el motivo en el tooltip (v1.2.34).
 - **Guardarraíl (principio §2.4).** Nunca se usan coordenadas, horarios ni webs
   del LLM. Su salida sólo decide "qué nombres mostrar y en qué orden".
 - **Ruta crítica.** `AI_DEADLINE_MS = 12 s`. Si la IA lo supera (picos de "high

@@ -38,7 +38,7 @@ const OVERPASS_ENDPOINTS=[
 const GEOAPIFY_KEY=(process.env.GEOAPIFY_API_KEY||"").trim();
 const GOOGLE_KEY=(process.env.GOOGLE_PLACES_API_KEY||"").trim();
 const GEMINI_KEY=(process.env.GEMINI_API_KEY||"").trim();
-const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.33 (personal-use)";
+const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.34 (personal-use)";
 const DEBUG_EXTERNAL=process.env.DEBUG_EXTERNAL==="1";
 const debug=(...a)=>{if(DEBUG_EXTERNAL)console.warn(...a);};
 
@@ -1231,13 +1231,13 @@ async function localityProfile(destination) {
 const destinationRequests=new Map();
 async function robustDestinationContent(kind,destination){
   const profile=await localityProfile(destination);
-  const key=`content:v9:${kind}:${destination.lat}:${destination.lon}:${profile.tier}`;
+  const key=`content:v10:${kind}:${destination.lat}:${destination.lon}:${profile.tier}`;
   const fresh=cacheGet(key);
   if(fresh)return fresh.data;
   if(destinationRequests.has(key))return destinationRequests.get(key);
   const task=(async()=>{
     const radius=profile.radiusKm*1000,target=profile.targets[kind],all=[],errors=[],sources=[];
-    let aiRanking={},aiComplete=true;
+    let aiRanking={},aiReasons={},aiComplete=true;
     const collect=async(name,job)=>{try{all.push(...await job());sources.push(name);}catch(e){errors.push(name);debug(name,e.message);}};
     const jobs=[];
     // Curación por IA (sólo actividades). Aditiva: propone nombres, se geocodifican
@@ -1251,7 +1251,7 @@ async function robustDestinationContent(kind,destination){
           aiCuratePlaces({kind:'activities',area:destination.name,radiusKm:profile.radiusKm}),
           new Promise((_,rej)=>setTimeout(()=>rej(new Error('ai-deadline')),AI_DEADLINE_MS))
         ]);
-        aiRanking=cur.ranking||{};
+        aiRanking=cur.ranking||{};aiReasons=cur.reasons||{};
         if(cur.source==='error'){aiComplete=false;debug('ai',cur.error);return;}
         if(cur.suggestions.length)all.push(...await aiPlaceCandidates(cur.suggestions,{near:destination,radiusKm:profile.radiusKm,cap:16}));
         sources.push('ai');
@@ -1286,7 +1286,7 @@ async function robustDestinationContent(kind,destination){
       && haversineKm(x,destination)<=profile.radiusKm && norm(x.name)!==norm(destination.name)
       && !(kind==='activities' && (ROUTE_SKIP_SETTLEMENT.test(x.shortDesc||'') || WIKI_SETTLEMENT_LEAD.test((x.description||'').slice(0,140)))));
     const ranked=enrichInterest(mergeRoutePlaces(eligible),destination.name)
-      .map(x=>({...x,aiInterest:x.aiInterest ?? aiRanking[normName(x.name)] ?? null}));
+      .map(x=>{const k=normName(x.name);return {...x,aiInterest:x.aiInterest ?? aiRanking[k] ?? null,aiReason:x.aiReason || aiReasons[k] || ""};});
     const items=topInterest(ranked,target,x=>aiRank(x,aiRanking));
     const result={status:errors.length?'partial':'ok',source:sources.join('+')||'none',items,
       selection:{target,available:ranked.length,returned:items.length,profile,ranking:Object.keys(aiRanking).length?'ai+interest':'interest',complete:!errors.length,errors}};
@@ -1413,7 +1413,7 @@ async function robustRouteStops(route,destination){
   const index=routeGeometryIndex(route.coords);
   const target=routeStopTarget(route.roadKm ?? index.total);
   const fingerprint=createHash("sha256").update(JSON.stringify({coords:route.coords,destination,target})).digest("hex").slice(0,24);
-  const key=`routeStops:v27:${fingerprint}`;
+  const key=`routeStops:v28:${fingerprint}`;
   const fresh=cacheGet(key);
   // Un resultado bajo el objetivo nunca evita una nueva búsqueda.
   if(fresh?.data?.coverage?.outcome==="target-reached" && fresh.data.items.length>=target)
@@ -1479,13 +1479,13 @@ async function aiRouteSuggestions(route,destination,index){
   const run=(async()=>{
     const from=(await reverseGeocode(origin.lat,origin.lon).catch(()=>null))?.name||"";
     const cur=await aiCuratePlaces({kind:"route",from,to:destination.name,roadKm:Math.round(route.roadKm||index.total)});
-    if(cur.source==="error")return {candidates:[],ranking:{},meta:{ok:false,error:cur.error}};
+    if(cur.source==="error")return {candidates:[],ranking:{},reasons:{},meta:{ok:false,error:cur.error}};
     const candidates=cur.suggestions.length
       ? await aiPlaceCandidates(cur.suggestions,{routeIndex:index,radiusKm:12,cap:16,endpoints:[origin,destination]})
       : [];
-    return {candidates,ranking:cur.ranking,meta:{ok:true,suggested:cur.suggestions.length,added:candidates.length}};
-  })().catch(e=>({candidates:[],ranking:{},meta:{ok:false,error:e?.message||String(e)}}));
-  const deadline=new Promise(r=>setTimeout(()=>r({candidates:[],ranking:{},meta:{ok:false,timedOut:true}}),AI_DEADLINE_MS));
+    return {candidates,ranking:cur.ranking,reasons:cur.reasons||{},meta:{ok:true,suggested:cur.suggestions.length,added:candidates.length}};
+  })().catch(e=>({candidates:[],ranking:{},reasons:{},meta:{ok:false,error:e?.message||String(e)}}));
+  const deadline=new Promise(r=>setTimeout(()=>r({candidates:[],ranking:{},reasons:{},meta:{ok:false,timedOut:true}}),AI_DEADLINE_MS));
   return Promise.race([run,deadline]);
 }
 
@@ -1562,7 +1562,7 @@ async function discoverRouteStops(route,destination,index,target,key){
     searchRoutePlaces({centers:index.centers,providers,target,prepare,pause:()=>sleep(120)})
   ]);
   const ranked=enrichInterest(prepare([...corridorHits,...ai.candidates,...found.candidates]),destination.name)
-    .map(x=>({...x,aiInterest:x.aiInterest ?? ai.ranking[normName(x.name)] ?? null}));
+    .map(x=>{const k=normName(x.name);return {...x,aiInterest:x.aiInterest ?? ai.ranking[k] ?? null,aiReason:x.aiReason || ai.reasons[k] || ""};});
   const rankScore=x=>aiRank(x,ai.ranking);
   // Se devuelven MUCHAS más candidatas que el objetivo mínimo (`target`): el
   // cliente reordena por "qué te apetece hoy" y así puede sacar a flote paradas
@@ -1986,4 +1986,4 @@ app.post("/api/plan/route-via",async(req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Travel Planner 1.2.33 en http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`Travel Planner 1.2.34 en http://localhost:${PORT}`));

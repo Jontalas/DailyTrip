@@ -247,6 +247,16 @@ test('recorte conserva interés máximo y preferencias no ordenan por desvío',(
   assert.ok(Math.min(...topInterest(items,20).map(x=>x.interestScore))>=Math.max(...items.filter(x=>!topInterest(items,20).includes(x)).map(x=>x.interestScore)));
 });
 
+test('applyPreferences ordena por la nota de la IA cuando existe, sin ocultar lo que no puntúa',()=>{
+  const items=[
+    {...p('Bajo interés propio',10),interestScore:20,aiInterest:95},   // la IA la sube a lo más alto
+    {...p('Alto interés propio',20),interestScore:90},                  // sin nota de IA: se ordena por interestScore
+    {...p('Medio con IA',30),interestScore:50,aiInterest:60}
+  ];
+  const order=applyPreferences({route:items},[]).route.map(x=>x.name);
+  assert.deepEqual(order,['Bajo interés propio','Alto interés propio','Medio con IA']);
+});
+
 test('población usa observación reciente aunque antes fuera mayor',()=>{
   const claim=(amount,time)=>({mainsnak:{datavalue:{value:{amount}}},qualifiers:{P585:[{datavalue:{value:{time}}}]}});
   assert.equal(latestPopulation([claim('+5000','+2000'),claim('+3000','+2024')]),3000);

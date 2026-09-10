@@ -49,7 +49,7 @@ test('aiCuratePlaces sin clave no llama a la red y devuelve vacío', async () =>
     fetch: async () => { called = true; return { ok: true, json: async () => ({}) }; }
   });
   assert.equal(called, false);
-  assert.deepEqual(res, { suggestions: [], ranking: {}, source: 'off' });
+  assert.deepEqual(res, { suggestions: [], ranking: {}, reasons: {}, source: 'off' });
 });
 
 test('aiCuratePlaces parsea la respuesta de Gemini en sugerencias + ranking', async () => {
@@ -81,6 +81,7 @@ test('aiCuratePlaces parsea la respuesta de Gemini en sugerencias + ranking', as
   assert.equal(res.suggestions.length, 2); // se descartan la vacía y la de nota inválida
   assert.equal(res.suggestions[1].category, 'attraction'); // categoría fuera de lista -> attraction
   assert.equal(res.ranking[normName('Cueva de Nerja')], 92);
+  assert.equal(res.reasons[normName('Cueva de Nerja')], 'Gran cueva.');
 });
 
 test('aiCuratePlaces nunca lanza: un fallo de red se traduce en resultado vacío', async () => {
