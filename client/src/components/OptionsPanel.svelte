@@ -8,6 +8,7 @@
     toggleRouteStop,
     toggleActivity,
     setLunch,
+    setSkipLunch,
     setDinner,
     setHotel,
     openOptionGroup,
@@ -304,8 +305,11 @@
     {@render loadStatus("food")}
     {@render mealCustomAdd("lunch", "comida")}
     <div class="list scroll-y">
-      <button class="none" class:on={!$selected.lunch} type="button" onclick={() => setLunch(null)}>
+      <button class="none" class:on={!$selected.lunch && !$selected.skipLunch} type="button" onclick={() => setLunch(null)}>
         Sin restaurante — se reserva el bloque igualmente
+      </button>
+      <button class="none" class:on={$selected.skipLunch} type="button" onclick={() => setSkipLunch(!$selected.skipLunch)}>
+        No comer a mediodía — no se reserva tiempo
       </button>
       {#if $selected.lunch?.custom}
         <OptionCard item={$selected.lunch} mode="single" meal="lunch" custom selected phaseLabel="EN DESTINO" onselect={() => setLunch(null)} onremove={() => setLunch(null)} />
@@ -359,7 +363,7 @@
     {@render loadStatus("food")}
     {@render mealCustomAdd("dinner", "cena")}
     <div class="list scroll-y">
-      <button class="none" class:on={!$selected.dinner} type="button" onclick={() => setDinner(null)}>Sin cena</button>
+      <button class="none" class:on={!$selected.dinner} type="button" onclick={() => setDinner(null)}>Sin cena — no se reserva tiempo</button>
       {#if $selected.dinner?.custom}
         <OptionCard item={$selected.dinner} mode="single" meal="dinner" custom selected onselect={() => setDinner(null)} onremove={() => setDinner(null)} />
       {/if}
@@ -379,7 +383,7 @@
     {@render loadStatus("lodging")}
     {@render mealCustomAdd("hotel", "alojamiento")}
     <div class="list scroll-y">
-      <button class="none" class:on={!$selected.hotel} type="button" onclick={() => setHotel(null)}>Sin alojamiento</button>
+      <button class="none" class:on={!$selected.hotel} type="button" onclick={() => setHotel(null)}>Sin alojamiento — no se reserva tiempo</button>
       {#if $selected.hotel?.custom}
         <OptionCard item={$selected.hotel} mode="single" custom selected onselect={() => setHotel(null)} onremove={() => setHotel(null)} />
       {/if}

@@ -27,7 +27,8 @@ export const emptySelected = () => ({
   activities: [],
   lunch: null,
   dinner: null,
-  hotel: null
+  hotel: null,
+  skipLunch: false
 });
 
 export const pools = writable(emptyPools());
@@ -155,7 +156,13 @@ export function toggleActivity(item) {
 
 export function setLunch(item) {
   if (item) ensureCustomDuration(item);
-  selected.update((s) => ({ ...s, lunch: item || null }));
+  selected.update((s) => ({ ...s, lunch: item || null, skipLunch: item ? false : s.skipLunch }));
+}
+
+/** Comida: no reservar tiempo en absoluto (ni el bloque protegido 12:30–14:30
+    sin restaurante). Distinto de `lunch: null`, que sigue reservando ese bloque. */
+export function setSkipLunch(v) {
+  selected.update((s) => ({ ...s, skipLunch: !!v, lunch: v ? null : s.lunch }));
 }
 
 export function setDinner(item) {

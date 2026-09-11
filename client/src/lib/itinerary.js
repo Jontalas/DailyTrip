@@ -35,7 +35,11 @@ export function travelPoints({chosen,routeData,selected,orderedStops}) {
 }
 export function buildItinerary({originName="Origen",chosen,routeData,selected,durationOf,departureMin,legCache=new Map(),orderedStops=null}) {
   const events=[], warnings=[];
-  let t=departureMin, estimated=false, lunchDone=false;
+  // `skipLunch` desactiva la comida protegida (§2.8): el usuario ha dicho
+  // explícitamente que no quiere reservar tiempo para comer. `lunchDone=true`
+  // desde el principio hace que ninguna de las comprobaciones de abajo
+  // inserte el bloque reservado ni fuerce parar a comer.
+  let t=departureMin, estimated=false, lunchDone=!!selected.skipLunch;
   if(!chosen || !routeData) return {events,endTime:t,warnings};
   const {route,destination,hasBase}=itineraryStops(selected,chosen,routeData.coords?.[0],orderedStops);
   let current=routeData.coords?.[0] || chosen;
@@ -141,7 +145,7 @@ export function approximateSchedule(args) {
 }
 export function isLunchViable(args) {
   if(!args.item) return false;
-  const selected={...(args.selected || {route:args.selectedRoute || [],activities:[],hotel:null,dinner:null}),lunch:args.item};
+  const selected={...(args.selected || {route:args.selectedRoute || [],activities:[],hotel:null,dinner:null}),lunch:args.item,skipLunch:false};
   const result=buildItinerary({...args,selected});
   const lunch=result.events.find(e=>e.kind==="lunch");
   return !!lunch && lunch.time<=LUNCH_LIMIT;

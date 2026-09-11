@@ -250,7 +250,15 @@ La comida puede ocurrir:
 
 Las opciones propuestas deben ser compatibles con esa ventana siempre que se disponga de información suficiente.
 
-Si no se elige restaurante concreto, sigue existiendo un bloque de comida.
+Si no se elige restaurante concreto, sigue existiendo un bloque de comida — **salvo
+que el usuario marque explícitamente «No comer a mediodía» (`selected.skipLunch`,
+desde v1.2.44)**, en cuyo caso no se reserva ningún tiempo para comer. Ese
+invariante es distinto de simplemente no elegir restaurante: la ausencia de
+selección conserva el bloque; el `skipLunch` lo elimina. Ver v1.2.44 en §43.
+
+Cena y alojamiento nunca han reservado tiempo de forma forzosa: si no se elige
+restaurante de cena o alojamiento, simplemente no aparecen en el itinerario. No
+necesitan un `skip` propio.
 
 ## 2.9. El itinerario debe estar siempre visible
 
@@ -2419,6 +2427,79 @@ Al crearla:
 ---
 
 # 43. CHANGELOG DE CONTINUIDAD
+
+## v1.2.44 — Opción de no reservar tiempo para comer
+
+- **Motivo.** La comida (§2.8, «comida protegida») reservaba SIEMPRE un bloque
+  de 85 min entre 12:30 y 14:30 aunque el usuario no eligiera restaurante: no
+  había forma de decir «hoy no quiero parar a comer». Cena y alojamiento ya
+  funcionaban así (no elegir nada = no se reserva tiempo); sólo la comida
+  forzaba el bloque.
+- **Problema que se intenta resolver.** El usuario pidió una opción explícita
+  para que comida, cena y/o alojamiento «no se incluyan», es decir, que no se
+  reserve tiempo en el itinerario para ellos.
+- **Comportamiento anterior.** `selected.lunch === null` siempre disparaba
+  `reservedLunch()` en `buildItinerary` (`client/src/lib/itinerary.js`): se
+  insertaba «Comida — Bloque reservado para comer» (85 min) en algún punto
+  entre las 12:30 y las 14:30, moviendo el resto del itinerario. No existía
+  forma de evitarlo sin elegir un restaurante concreto.
+- **Comportamiento nuevo.** Nuevo campo `selected.skipLunch` (boolean,
+  `emptySelected()` en `client/src/lib/stores.js`). Cuando es `true`:
+  - `buildItinerary` no reserva ningún bloque de comida ni fuerza parar a
+    comer en ningún punto del día (`lunchDone` arranca en `true` en vez de
+    `false`, así que todas las comprobaciones `!selected.lunch && !lunchDone`
+    quedan desactivadas de una sola vez).
+  - `selected.lunch` se mantiene a `null` mientras `skipLunch` es `true`
+    (`setSkipLunch(true)` lo fuerza a `null`; elegir un restaurante real con
+    `setLunch(item)` desactiva `skipLunch` automáticamente).
+  - Cena y alojamiento no necesitaron cambios: no elegir nada ya significaba
+    «no reservar tiempo» (comprobado en `itinerary.js`, no había ningún
+    `reservedDinner`/`reservedHotel` equivalente).
+- **Archivos y funciones afectadas.**
+  - `client/src/lib/stores.js`: `emptySelected()` añade `skipLunch:false`;
+    `setLunch(item)` limpia `skipLunch` al elegir un restaurante concreto;
+    nueva `setSkipLunch(v)`.
+  - `client/src/lib/itinerary.js`: `buildItinerary` inicializa
+    `lunchDone=!!selected.skipLunch`; `isLunchViable` fuerza `skipLunch:false`
+    al evaluar la viabilidad de un restaurante concreto (si no, un `skipLunch`
+    heredado del estado real impediría evaluar correctamente esa opción).
+  - `client/src/components/OptionsPanel.svelte`: en el grupo «Comida», nuevo
+    botón «No comer a mediodía — no se reserva tiempo» junto al ya existente
+    «Sin restaurante — se reserva el bloque igualmente» (ahora resaltado sólo
+    cuando `!lunch && !skipLunch`). Los botones «Sin cena» / «Sin alojamiento»
+    pasan a «Sin cena — no se reserva tiempo» / «Sin alojamiento — no se
+    reserva tiempo» para dejar explícito que ya se comportaban así.
+- **Algoritmos/constantes modificados.** Ninguno (`LUNCH_START`, `LUNCH_END`,
+  `LUNCH_TARGET`, `LUNCH_LIMIT` sin cambios). Sólo se añade una vía para
+  desactivar por completo la reserva de comida.
+- **Nuevos invariantes funcionales.** `skipLunch` y `lunch` son mutuamente
+  excluyentes: `lunch` con valor implica `skipLunch:false`; `skipLunch:true`
+  implica `lunch:null`. Nunca se muestra el bloque reservado ni un evento de
+  comida cuando `skipLunch` es `true`.
+- **Qué comportamiento anterior debe conservarse.** Sin tocar `skipLunch`
+  (`false` por defecto, también para instantáneas de viaje guardadas antes de
+  esta versión, que no traen el campo), el comportamiento es idéntico al
+  histórico: comida siempre protegida entre 12:30 y 14:30.
+- **Fallbacks y tratamiento de errores.** Ninguno nuevo; no hay llamadas a
+  proveedores externos implicadas.
+- **Impacto en UI y experiencia del usuario.** Nuevo botón en el grupo
+  «Comida» de `OptionsPanel`; texto aclaratorio en «Cena» y «Alojamiento».
+  Ningún cambio de layout ni de acordeón.
+- **Impacto en APIs/proveedores externos.** Ninguno. `/api/plan/day` no
+  necesita cambios: `dayStops`/`orderDay` (`client/src/lib/day-plan.js`,
+  compartido con el servidor vía `lib/day-routing.js`) ya omiten la comida de
+  la secuencia cuando `selected.lunch` es `null`, sea por `skipLunch` o por
+  simple indecisión; el bloque reservado sólo lo inserta `buildItinerary` en
+  el cliente, nunca el servidor.
+- **Compatibilidad con datos/caché/versiones anteriores.** `selected` se
+  serializa completo en `trip-state.js`; una instantánea antigua sin
+  `skipLunch` se comporta como `skipLunch:false` (comportamiento histórico).
+  No cambia ninguna clave de caché del servidor.
+- **Pruebas o validaciones realizadas.** `node --check server.js`,
+  `node --check public/app.js` (tras `npm run build`), `npm test`.
+- **Limitaciones conocidas que permanecen.** Ninguna nueva. Cena y alojamiento
+  no tienen (ni necesitan) un `skipDinner`/`skipHotel`: ya se excluyen sin
+  reservar tiempo con sólo no seleccionar nada.
 
 ## v1.2.43 — Lugares personalizados: respaldo con Geoapify + nombres de marca
 
