@@ -2428,6 +2428,23 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.46 — Asistente conversacional, Fase 2: aplicar cambios por chat
+
+- **Motivo.** Poder pedir cambios (comida/cena/alojamiento, paradas, actividades, hora
+  de salida, añadir un lugar por nombre) por chat, no sólo preguntar.
+- **Qué.** El chat del itinerario puede ahora ejecutar cambios reales usando las
+  mismas funciones que los botones de la UI (function calling de Gemini + ejecución y
+  validación 100% en el cliente; el servidor sólo reenvía las llamadas propuestas,
+  nunca las aplica). Ningún id inventado por el modelo tiene efecto; `add_*`/`remove_*`
+  comprueban el estado real antes de tocar nada.
+- **Bug encontrado y corregido en el propio proceso de validación** (probando contra
+  la API real, no sólo en teoría): una herramienta "toggle" ambigua podía añadir algo
+  cuando el usuario pedía quitarlo (si no estaba ya seleccionado). Sustituida por pares
+  explícitos `add_*`/`remove_*` con comprobación de estado en el cliente.
+- **Detalle completo, archivos y validación.** Ver §46.10.
+- **Validación.** `npm test` 67/67; `node --check`; `npm run build` limpio; batería de
+  pruebas manuales contra la API real de Gemini y contra el endpoint HTTP real.
+
 ## v1.2.45 — Asistente conversacional, Fase 1: preguntas de sólo lectura sobre el plan
 
 - **Motivo.** Primer paso de un plan por fases para poder interactuar con el plan por
@@ -5590,3 +5607,85 @@ cliente ya ha calculado.
 - **Limitaciones conocidas.** Sin function-calling: no puede "hacer" nada, sólo
   responder sobre lo ya calculado. Si el usuario pregunta algo que requeriría cambiar el
   plan, el asistente no lo hará (fase 2).
+
+## 46.10. Asistente conversacional — Fase 2: aplicar cambios por chat (v1.2.46)
+
+Añade a la Fase 1 (§46.9) la capacidad de PEDIR cambios por chat: comida/cena/
+alojamiento, paradas, actividades, hora de salida, o añadir un lugar nuevo por nombre.
+Mismo endpoint (`POST /api/assistant/ask`), mismo panel (`AssistantPanel.svelte`).
+
+- **Motivo.** El usuario pidió poder "interaccionar para hacer cambios (de ruta,
+  horarios…), añadidos y/o preguntas y puntualizaciones para refinar la ruta" — la
+  Fase 2 del plan por etapas acordado.
+- **Diseño clave: el servidor NUNCA ejecuta nada.** Gemini decide qué herramienta(s)
+  llamar (function calling), pero `askAssistant()` en `lib/assistant.js` sólo devuelve
+  esas llamadas (`actions:[{tool,args}]`) al cliente. Es el CLIENTE quien las aplica,
+  llamando exactamente las mismas funciones que usan los botones de la UI
+  (`setLunch`, `setDinner`, `setHotel`, `setSkipLunch`, `toggleRouteStop`,
+  `toggleActivity`, `removeCustomStop`, `departureTime.set`, `addCustomStopEnriched`,
+  `setCustomMeal`). Por tanto cada cambio queda validado por el mismo código que ya
+  usa la UI (mismos guardarraíles, misma reactividad, mismo undo con un clic) y es
+  indistinguible de si el usuario lo hubiera hecho a mano.
+- **Guardarraíl de ids: el modelo nunca inventa un lugar existente.** El prompt incluye
+  `optionsText` (`describeOptions()` en `client/src/lib/assistant.js`): listas de
+  paradas/actividades/comida/cena/alojamiento YA descubiertas, cada una con su `id`
+  real. El modelo sólo puede referenciar esos ids; para algo que no está en ninguna
+  lista debe usar `add_place({kind,query})`, que geocodifica el nombre de verdad
+  (mismo camino que "Añadir por nombre" en `OptionsPanel`) — nunca inventa coordenadas.
+  Cualquier id que el modelo cite mal o invente simplemente no se encuentra al aplicar
+  la acción (`findById` en `AssistantPanel.svelte`) y no tiene efecto: se informa "no
+  encontré esa opción" en vez de adivinar.
+- **Bug real encontrado y corregido durante la validación: "toggle" es ambiguo.**
+  Primer diseño: una sola herramienta `toggle_route_stop`/`toggle_activity` que añade
+  si no estaba y quita si estaba. Probado contra la API real de Gemini: al pedir
+  "quita el museo" sobre una actividad que NO estaba seleccionada, el modelo llamó al
+  toggle igualmente — que la habría AÑADIDO, justo lo contrario de lo pedido. Se
+  sustituyó por parejas explícitas `add_route_stop`/`remove_route_stop` y
+  `add_activity`/`remove_activity`. Además, en el cliente cada `remove_*` comprueba
+  que el id esté REALMENTE seleccionado antes de tocar nada (si no, responde "no
+  estaba entre las elegidas" y no hace nada); cada `add_*` comprueba que NO lo esté ya.
+  Así, aunque el modelo vuelva a equivocarse de objetivo, la ejecución nunca hace lo
+  contrario de lo pedido: como mucho no hace nada y lo dice.
+- **Multi-cambio en un mismo mensaje.** Gemini puede devolver varias `functionCall` en
+  una sola respuesta. Probado: "quita el museo y añade el mirador y sal a las 8" → 3
+  acciones en la misma llamada, todas correctas. Requirió reforzar la instrucción de
+  sistema explícitamente ("si la petición incluye varios cambios, DEBES llamar a TODAS
+  las herramientas necesarias en esta misma respuesta") — sin ese refuerzo, en pruebas
+  reales el modelo a veces sólo ejecutaba uno de los cambios pedidos.
+- **Herramientas (`TOOLS` en `lib/assistant.js`).** `set_lunch`/`clear_lunch`/
+  `skip_lunch`, `set_dinner`/`clear_dinner`, `set_hotel`/`clear_hotel`,
+  `add_route_stop`/`remove_route_stop`, `add_activity`/`remove_activity`,
+  `remove_custom_stop`, `set_departure_time`, `add_place`.
+- **Confirmación siempre generada por código, nunca por el modelo.** Cada rama de
+  `runAction()` en `AssistantPanel.svelte` devuelve una frase construida a partir del
+  `item.name` real ya validado (p. ej. "Cena → Casa Puga.") — el modelo puede callar
+  (`answer:null`) cuando sólo llama herramientas; lo que el usuario lee siempre
+  describe lo que el código realmente hizo.
+- **Archivos afectados.** `lib/assistant.js` (TOOLS, `toolConfig`, parseo de
+  `functionCall` en `callGeminiOnce`, `optionsText` en el prompt); `server.js`
+  (reenvía `context.optionsText`, devuelve `actions`); `client/src/lib/assistant.js`
+  (`describeOptions()`); `client/src/components/AssistantPanel.svelte` (`runAction()`,
+  `routeBox()`, ejecuta cada acción y compone la respuesta final).
+- **Nuevos invariantes.** El modelo decide, el cliente valida y ejecuta. Ninguna acción
+  se aplica si su id no existe en las listas reales en ese momento. `add_*` no duplica
+  una selección existente; `remove_*` no toca nada si no estaba seleccionado.
+- **Qué comportamiento anterior se conserva.** La Fase 1 (preguntas puras, sin cambios)
+  funciona igual: si el usuario sólo pregunta, el modelo no llama ninguna herramienta y
+  `actions` llega vacío.
+- **Impacto en UI/UX.** Mismo panel; el texto de ayuda ahora menciona que se pueden
+  pedir cambios y que se aplican al momento (deshacibles como cualquier selección).
+- **Limitaciones conocidas.** El modelo puede, en peticiones muy ambiguas, no acertar
+  con la opción exacta (p. ej. dos restaurantes de nombre parecido); en ese caso puede
+  llamar a la herramienta equivocada — el guardarraíl evita que eso rompa nada
+  (`add_*`/`remove_*` no-op si el estado ya coincide), pero no garantiza acertar la
+  intención. `add_place` depende de la calidad de la geocodificación existente (mismas
+  limitaciones que "Añadir por nombre" en `OptionsPanel`). No hay bucle de
+  aclaración multi-turno con más de una vuelta: si el modelo pide aclaración por texto,
+  la siguiente respuesta del usuario ya incluye el `optionsText` actualizado, así que
+  funciona, pero no hay confirmación explícita "¿seguro?" antes de aplicar un cambio.
+- **Validación.** `npm test` 67/67; `node --check server.js` y `lib/assistant.js`;
+  `npm run build` limpio; batería de pruebas manuales contra la API real de Gemini
+  (cambiar cena por nombre, añadir lugar nuevo por nombre + quitar actividad a la vez,
+  pregunta pura sin acciones, cambiar hora de salida, quitar algo no seleccionado,
+  añadir algo no seleccionado, quitar algo sí seleccionado, y multi-cambio de 3
+  acciones) y contra `POST /api/assistant/ask` con el servidor real levantado.

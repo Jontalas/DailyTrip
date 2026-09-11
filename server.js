@@ -40,7 +40,7 @@ const OVERPASS_ENDPOINTS=[
 const GEOAPIFY_KEY=(process.env.GEOAPIFY_API_KEY||"").trim();
 const GOOGLE_KEY=(process.env.GOOGLE_PLACES_API_KEY||"").trim();
 const GEMINI_KEY=(process.env.GEMINI_API_KEY||"").trim();
-const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.45 (personal-use)";
+const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.46 (personal-use)";
 const DEBUG_EXTERNAL=process.env.DEBUG_EXTERNAL==="1";
 const debug=(...a)=>{if(DEBUG_EXTERNAL)console.warn(...a);};
 
@@ -1646,23 +1646,27 @@ app.post("/api/ai/curate",async(req,res)=>{
   }catch(e){ res.status(502).json({status:"error",error:e?.message||"No se pudo consultar la IA."}); }
 });
 
-// Asistente conversacional de sólo lectura sobre el itinerario ya calculado
-// por el cliente (ver lib/assistant.js y doc §46.9). No toca ningún dato del
-// viaje: recibe el texto del plan ya construido y responde preguntas sobre él.
+// Asistente conversacional sobre el plan (ver lib/assistant.js, doc §46.9/§46.10).
+// El servidor SÓLO habla con Gemini y devuelve texto + "actions" propuestas: nunca
+// ejecuta nada él mismo. El cliente decide qué opciones/paradas existen (las manda
+// en `context.optionsText`) y es quien aplica cada action llamando a las mismas
+// funciones que usan los botones de la UI, así todo cambio queda validado contra
+// datos reales y es tan reversible como un clic.
 app.post("/api/assistant/ask",async(req,res)=>{
   const question=String(req.body?.question||"").trim();
-  if(!question)return res.status(400).json({answer:null,error:"Falta la pregunta."});
-  if(!assistantConfigured())return res.json({answer:null,source:"off",error:"La IA no está configurada en este servidor (falta GEMINI_API_KEY)."});
+  if(!question)return res.status(400).json({answer:null,actions:[],error:"Falta la pregunta."});
+  if(!assistantConfigured())return res.json({answer:null,actions:[],source:"off",error:"La IA no está configurada en este servidor (falta GEMINI_API_KEY)."});
   try{
     const history=Array.isArray(req.body?.history)?req.body.history.slice(-8):[];
     const result=await askAssistant({
       question,
       planText:String(req.body?.context?.planText||""),
       warningsText:String(req.body?.context?.warningsText||""),
+      optionsText:String(req.body?.context?.optionsText||""),
       history
     });
     res.json(result);
-  }catch(e){ res.status(502).json({answer:null,error:"No se pudo consultar a la IA."}); }
+  }catch(e){ res.status(502).json({answer:null,actions:[],error:"No se pudo consultar a la IA."}); }
 });
 
 async function discoverRouteStops(route,destination,index,target,key){
@@ -2182,4 +2186,4 @@ app.post("/api/plan/route-via",async(req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Travel Planner 1.2.45 en http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`Travel Planner 1.2.46 en http://localhost:${PORT}`));
