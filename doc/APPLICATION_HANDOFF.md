@@ -2428,6 +2428,20 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.45 — Asistente conversacional, Fase 1: preguntas de sólo lectura sobre el plan
+
+- **Motivo.** Primer paso de un plan por fases para poder interactuar con el plan por
+  chat (preguntas, luego cambios, ver diseño discutido) sin arriesgar el motor de
+  itinerario ya probado ni el guardarraíl de no confiar en el LLM para datos duros.
+- **Qué.** Nuevo panel plegable «💬 Preguntar sobre este plan» dentro del itinerario.
+  Responde preguntas sobre el plan YA calculado (horarios, duraciones, tiempo libre,
+  avisos, km) usando Gemini, con instrucción explícita de no inventar nada que no esté
+  en esos datos (precios, horarios de apertura, reservas → responde que no lo sabe).
+  No modifica ninguna selección ni dato del viaje: es de sólo lectura.
+- **Detalle completo, archivos y validación.** Ver §46.9.
+- **Validación.** `npm test` 67/67; `node --check`; `npm run build` limpio; prueba
+  manual end-to-end contra la API real de Gemini y contra el endpoint HTTP real.
+
 ## v1.2.44 — Opción de no reservar tiempo para comer
 
 - **Motivo.** La comida (§2.8, «comida protegida») reservaba SIEMPRE un bloque
@@ -5513,3 +5527,66 @@ funciona igual con Wikipedia/Geoapify/OSM: la IA **suma**, no es un requisito.
 - **Siguiente paso posible.** Si la calidad se confirma, hacer la IA el proveedor
   primario del corredor y adelgazar el barrido de Wikipedia (`corridorLandmarks`
   + pasada profunda), que es el 429 que aún alarga la cola.
+
+## 46.9. Asistente conversacional — Fase 1: preguntas de sólo lectura (v1.2.45)
+
+Primera fase de un plan por etapas (ver conversación de diseño) para poder interactuar
+con la app por lenguaje natural sin sustituir el motor determinista ni su UI. Esta fase
+**no decide ni modifica nada**: sólo responde preguntas sobre el itinerario que el motor
+cliente ya ha calculado.
+
+- **Motivo/objetivo.** El usuario pidió poder "preguntar y matizar" el plan por chat.
+  Para no arriesgar el motor de itinerario (44 versiones de invariantes probados) ni el
+  guardarraíl de no confiar en el LLM para datos duros (§2.4), la Fase 1 se limita a
+  Preguntas y Respuestas de sólo lectura sobre el plan ya construido.
+- **Qué NO hace todavía.** No modifica `selected`, `chosen`, duraciones ni nada del
+  estado del viaje. No busca en internet. No tiene "tools"/function-calling. Eso son
+  fases posteriores (2: aplicar cambios vía las mismas funciones que usan los botones;
+  3: borrador automático del día).
+- **Piezas nuevas.**
+  - `lib/assistant.js` (servidor): `askAssistant({question,planText,warningsText,history})`
+    llama a Gemini (`generateContent`, texto libre, sin `responseSchema` — a diferencia
+    de `ai-curator.js`, aquí la salida es una respuesta conversacional, no una lista
+    estructurada) con una instrucción de sistema que exige responder **únicamente** con
+    los datos del itinerario recibidos en el prompt, y decir explícitamente "no lo sé
+    con estos datos" ante precios/horarios/reservas que no aparezcan ahí. Mismo patrón
+    de reintento (1 reintento ante 429/5xx/"high demand") que `ai-curator.js`, sin
+    caché (cada pregunta+historial es distinta). Aditivo: sin `GEMINI_API_KEY` responde
+    `{answer:null,source:"off"}` y la UI lo muestra como aviso, sin romper nada.
+  - `server.js`: `POST /api/assistant/ask` — recibe `{question, context:{planText,
+    warningsText}, history}`, valida la pregunta, llama a `askAssistant`. No toca caché
+    ni ningún otro subsistema.
+  - `client/src/lib/assistant.js`: `describePlan(result)` / `describeWarnings(result)`
+    convierten el `result` que ya devuelve `buildItinerary` (eventos con hora/nombre/
+    duración, avisos, km/min de ruta, hora de fin) en texto plano línea a línea. El
+    cliente nunca envía `selected`/`chosen` en crudo al endpoint del asistente: sólo
+    este texto ya derivado, así el servidor no puede "decidir" nada por su cuenta.
+  - `client/src/lib/api.js`: `assistantAsk({question,context,history})` → `POST
+    /api/assistant/ask`.
+  - `client/src/lib/stores.js`: `assistantMessages` (historial de la conversación de
+    esta sesión, `{role,text}`) y `assistantBusy`. No se persisten en el viaje guardado
+    (`trip-state.js` no los incluye): es conversación de sesión, no dato del plan.
+    `resetPlan()` los vacía al empezar una búsqueda nueva.
+  - `client/src/components/AssistantPanel.svelte`: panel plegable "💬 Preguntar sobre
+    este plan" con historial de mensajes, aviso de qué puede y qué no puede responder,
+    y un campo de texto. Vive dentro de `ItineraryPanel.svelte` (después de los avisos),
+    así hereda gratis su colocación en escritorio (rail derecho) y en móvil (hoja
+    "itin"): no hizo falta tocar `App.svelte` ni `MobileBar.svelte`.
+- **Nuevos invariantes.** El asistente sólo puede usar los datos que aparecen en
+  `planText`/`warningsText`; nunca coordenadas, precios ni horarios de apertura salidos
+  de su propio conocimiento (mismo guardarraíl que §46.8, aplicado a esta fase).
+- **Impacto en UI/UX.** Nuevo panel plegable en el itinerario, colapsado por defecto;
+  cero cambios en el resto de paneles/flujo. No afecta al layout si no se abre.
+- **Compatibilidad.** Ninguna clave de caché ni estructura de datos existente cambia.
+  Sin `GEMINI_API_KEY` el panel sigue apareciendo pero cada pregunta responde con el
+  aviso "La IA no está configurada en este servidor."
+- **Validación.** `npm test` 67/67 (sin tests nuevos: no hay lógica determinista nueva
+  que testear con mocks, sólo una llamada a Gemini); `node --check server.js` y
+  `lib/assistant.js`; `npm run build` limpio; prueba manual end-to-end contra la API
+  real de Gemini (pregunta de horario, pregunta de precio no disponible — respondió
+  correctamente que no lo sabe en vez de inventarlo — y pregunta de tiempo libre usando
+  el historial de la conversación) y contra `POST /api/assistant/ask` con el servidor
+  real levantado.
+- **Limitaciones conocidas.** Sin function-calling: no puede "hacer" nada, sólo
+  responder sobre lo ya calculado. Si el usuario pregunta algo que requeriría cambiar el
+  plan, el asistente no lo hará (fase 2).

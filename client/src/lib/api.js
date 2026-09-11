@@ -68,6 +68,13 @@ export const api = {
     return post("/api/ai/curate", { kind, route, destination });
   },
 
+  // Asistente conversacional de sólo lectura sobre el itinerario ya calculado.
+  // `context.planText`/`warningsText` son texto ya formateado (ver lib/assistant.js
+  // en el cliente); el servidor no recalcula nada, sólo responde con Gemini.
+  assistantAsk({ question, context, history }) {
+    return post("/api/assistant/ask", { question, context, history });
+  },
+
   optionsServices({ destination }) {
     return post("/api/options/services", { destination });
   },

@@ -1,6 +1,7 @@
 <script>
   import { fly } from "svelte/transition";
   import TimelineRow from "./TimelineRow.svelte";
+  import AssistantPanel from "./AssistantPanel.svelte";
   import { departureTime } from "../lib/stores.js";
   import { fromMin } from "../lib/format.js";
   import { dur } from "../lib/motion.js";
@@ -74,6 +75,10 @@
       </div>
     {/if}
   </div>
+
+  {#if hasPlan}
+    <AssistantPanel {result} />
+  {/if}
 </section>
 
 <style>

@@ -89,6 +89,13 @@ export const mapPickMode = writable(null);
    Vacío = sin filtro. Una opción seleccionada nunca se oculta. */
 export const optionFilter = writable("");
 
+/* Asistente conversacional de sólo lectura sobre el itinerario (Fase 1, ver
+   doc §46.9). Historial de la conversación actual ({role:"user"|"assistant",
+   text}) y si hay una pregunta en curso. No se persiste en el viaje guardado:
+   es una conversación de la sesión, no datos del plan. */
+export const assistantMessages = writable([]);
+export const assistantBusy = writable(false);
+
 /* ---- Helpers de duración (portados de app.js) --------------------------- */
 export function recommendedMinutes(item) {
   return Math.max(1, Math.round(Number(item?.durationMin) || 60));
@@ -133,6 +140,7 @@ export function resetPlan() {
   mapPickMode.set(null);
   optionFilter.set("");
   revealOptionId.set(null);
+  assistantMessages.set([]);
 }
 
 /* ---- Mutadores de selección (equivalen a bindSelections() de app.js) ---- */

@@ -1,0 +1,287 @@
+Quiero que planifiques una jornada de viaje en coche usando únicamente estos datos iniciales:
+
+* LOCALIDAD DE SALIDA: [ORIGEN]
+* LOCALIDAD DE DESTINO: [DESTINO]
+* FECHA DEL VIAJE: [FECHA]
+
+A partir de este punto, utiliza siempre esas tres referencias durante todo el análisis y no vuelvas a pedirme que las repita.
+
+Tu objetivo es recomendar únicamente lugares que realmente merezcan la pena, priorizando calidad e interés frente a cantidad.
+
+Debes consultar información actualizada en Internet antes de responder, especialmente para verificar horarios, días de cierre, precios, accesos, reservas y situación actual de restaurantes, monumentos, museos, cuevas, yacimientos u otras visitas.
+
+Ten siempre en cuenta la fecha indicada para comprobar si las visitas son realmente posibles ese día.
+
+La respuesta debe dividirse en 3 partes.
+
+## 1. DÓNDE COMER Y CENAR EN LA LOCALIDAD DE DESTINO
+
+Recomienda varios establecimientos para:
+
+* COMIDA.
+* CENA.
+
+Criterios prioritarios:
+
+1. Buena calidad gastronómica.
+2. Precio razonable. Evita restaurantes caros o de alta cocina salvo que exista una razón excepcional para recomendarlos.
+3. Prioriza cocina tradicional, gastronomía regional y productos propios de la localidad, provincia o región.
+4. Valora especialmente:
+
+   * producto local;
+   * pescado o marisco local si es una zona costera;
+   * carnes, verduras, quesos, embutidos, vinos u otros productos representativos de la zona;
+   * recetas tradicionales;
+   * establecimientos frecuentados por población local.
+5. Evita, en la medida de lo posible:
+
+   * restaurantes excesivamente turísticos;
+   * cadenas;
+   * lugares cuya principal virtud sea la decoración o las redes sociales;
+   * establecimientos caros sin una mejora gastronómica clara.
+6. No recomiendes un lugar únicamente por tener buenas valoraciones: analiza si realmente encaja con estos criterios.
+
+Para cada restaurante indica:
+
+* nombre;
+* tipo de cocina;
+* qué productos o platos locales merece la pena probar;
+* precio aproximado por persona;
+* por qué lo recomiendas;
+* si lo ves más apropiado para comida o cena;
+* posibles inconvenientes: reservas necesarias, colas, horario limitado, etc.
+
+Al final selecciona:
+
+* MEJOR OPCIÓN PARA COMER.
+* MEJOR OPCIÓN PARA CENAR.
+
+Intenta que comida y cena sean experiencias diferentes si resulta posible.
+
+---
+
+## 2. QUÉ VISITAR EN LA LOCALIDAD DE DESTINO ENTRE LA COMIDA Y LA CENA
+
+Diseña una visita para una sola tarde.
+
+Supón aproximadamente unas 4-6 horas disponibles entre comida y cena, aunque puedes adaptar el recorrido si la localidad lo requiere.
+
+Quiero ver principalmente lugares que puedan considerarse:
+
+* imprescindibles;
+* excepcionales;
+* muy interesantes;
+* singulares;
+* históricamente importantes;
+* visualmente impactantes;
+* difíciles de encontrar en otros lugares.
+
+No intentes rellenar la tarde con lugares secundarios simplemente para aumentar el número de visitas.
+
+Prioriza:
+
+* monumentos importantes;
+* castillos y fortalezas;
+* conjuntos arqueológicos;
+* catedrales o edificios religiosos realmente excepcionales;
+* museos extraordinarios o muy vinculados al lugar;
+* cuevas;
+* patrimonio industrial singular;
+* grandes miradores;
+* enclaves naturales extraordinarios;
+* edificios, espacios o experiencias realmente características de la localidad.
+
+Distingue claramente entre:
+
+A) lugares que merece la pena VISITAR por dentro o recorrer detenidamente;
+
+B) lugares interesantes simplemente para VER o pasar brevemente;
+
+C) zonas cuyo principal atractivo consiste solamente en pasear.
+
+Los lugares del grupo C deben tener menor prioridad salvo que el casco histórico, barrio o paseo sea excepcional por sí mismo.
+
+Para cada visita indica:
+
+* nivel de interés sobre 10;
+* por qué es importante;
+* qué se ve o se hace realmente;
+* duración recomendable;
+* precio aproximado;
+* horarios relevantes para la fecha indicada;
+* necesidad de reserva previa;
+* distancia o facilidad para combinarla con las otras visitas.
+
+Después crea el itinerario óptimo de la tarde, indicando aproximadamente:
+
+* hora;
+* visita;
+* duración;
+* desplazamiento al siguiente punto.
+
+No sobrecargues el itinerario.
+
+Prefiero visitar 3 lugares extraordinarios con tranquilidad antes que 7 lugares mediocres deprisa.
+
+Finalmente indica:
+
+* EL LUGAR Nº1 IMPRESCINDIBLE DE LA LOCALIDAD.
+* LOS 3 LUGARES QUE NO DEBERÍA PERDERME.
+* QUÉ DESCARTARÍAS SI SOLO TENGO UNA TARDE.
+
+---
+
+## 3. VISITAS IMPRESCINDIBLES DURANTE EL TRAYECTO EN COCHE
+
+Analiza la ruta razonable por carretera entre la localidad de salida y la localidad de destino indicadas al principio.
+
+Busca lugares que puedan visitarse durante el trayecto y que justifiquen realmente detener el coche.
+
+MUY IMPORTANTE:
+
+No quiero simplemente una lista de pueblos bonitos donde parar a pasear.
+
+Quiero principalmente VISITAS CONCRETAS que tengan contenido propio y que puedan ser interesantes, curiosas, sorprendentes, memorables o excepcionales.
+
+Ejemplos de lo que busco:
+
+* grandes monumentos;
+* castillos;
+* fortalezas;
+* palacios;
+* yacimientos arqueológicos;
+* cuevas;
+* minas visitables;
+* patrimonio industrial;
+* monasterios;
+* museos excepcionales;
+* ruinas;
+* restos romanos;
+* lugares históricos singulares;
+* formaciones geológicas;
+* miradores excepcionales;
+* enclaves naturales realmente extraordinarios;
+* construcciones curiosas;
+* lugares únicos o poco habituales;
+* experiencias que difícilmente encontraría en cualquier otra ciudad.
+
+Un pueblo bonito puede incluirse si es realmente excepcional, pero no debe ocupar una posición alta únicamente porque sus calles sean agradables.
+
+Para cada posible parada indica:
+
+* nombre del lugar;
+* localidad;
+* qué se visita exactamente;
+* por qué merece la pena;
+* nivel de interés sobre 10;
+* cuánto tiempo necesita la visita;
+* cuánto supone aproximadamente de desvío respecto a la ruta;
+* precio aproximado;
+* horario aplicable en la fecha indicada;
+* necesidad de reserva;
+* si lo consideras:
+
+  * IMPRESCINDIBLE;
+  * MUY RECOMENDABLE;
+  * RECOMENDABLE;
+  * PRESCINDIBLE.
+
+Valora especialmente la relación:
+
+INTERÉS DE LA VISITA / TIEMPO TOTAL QUE AÑADE AL VIAJE.
+
+No penalices ligeramente una visita extraordinaria por requerir 10-20 minutos adicionales de conducción, pero sí avisa claramente cuando un lugar implique un desvío importante.
+
+Evita recomendar dos o tres lugares muy similares si uno de ellos es claramente mejor.
+
+Si una localidad tiene varios elementos que juntos forman una gran visita, puedes agruparlos.
+
+Ejemplo:
+"Castillo + museo arqueológico + yacimiento".
+
+---
+
+## CRITERIO DE SELECCIÓN GLOBAL
+
+Quiero una selección exigente.
+
+No utilices el criterio:
+"Ya que pasas cerca, puedes verlo."
+
+Utiliza el criterio:
+"¿Me arrepentiría de haber pasado tan cerca y no haberlo visto?"
+
+Prioriza:
+
+1. excepcionalidad;
+2. interés;
+3. singularidad;
+4. valor histórico/cultural/natural;
+5. experiencia memorable;
+6. facilidad razonable de integración en la ruta.
+
+El kilometraje exacto debe servir para determinar si una visita es viable, pero no para convertir automáticamente en mejor una opción menos interesante simplemente porque esté unos kilómetros más cerca.
+
+---
+
+## RANKING FINAL
+
+Termina la respuesta con un ranking global de las mejores experiencias de todo el día:
+
+TOP 10 EXPERIENCIAS
+
+Para cada una indica:
+
+* puntuación sobre 10;
+* tipo:
+
+  * gastronomía;
+  * visita en destino;
+  * visita en ruta;
+* tiempo necesario.
+
+Después crea dos propuestas de viaje:
+
+### OPCIÓN A — SELECCIÓN ESENCIAL
+
+Para un viaje cómodo, seleccionando únicamente lo realmente extraordinario.
+
+Debe incluir:
+
+* mejores paradas durante la ruta;
+* lugar para comer;
+* visitas de la tarde;
+* lugar para cenar.
+
+### OPCIÓN B — DÍA MUY COMPLETO
+
+Para aprovechar intensamente el día, añadiendo alguna visita más si realmente merece la pena.
+
+Indica una planificación horaria aproximada desde la salida hasta la cena.
+
+---
+
+## REGLAS IMPORTANTES
+
+* Utiliza información actualizada.
+* Comprueba especialmente horarios y cierres para la fecha indicada.
+* No vuelvas a pedirme origen, destino o fecha: ya están definidos al principio.
+* Si la fecha cae en lunes, festivo, temporada baja o cualquier circunstancia que pueda afectar a cierres u horarios, compruébalo expresamente.
+* No inventes precios, horarios, distancias o tiempos.
+* Si una información no está confirmada, dilo.
+* Diferencia claramente entre datos confirmados y estimaciones.
+* Evita recomendaciones genéricas.
+* No incluyas lugares simplemente para completar una lista.
+* Si en algún tramo no existe nada verdaderamente excepcional, dilo claramente.
+* Si existe una visita extraordinaria que requiere un pequeño desvío, inclúyela.
+* Si una visita requiere reserva anticipada, destácalo claramente.
+* Considera el aparcamiento y acceso en coche cuando sea relevante.
+* Ten en cuenta que después habrá que continuar conduciendo.
+* Cuando varios lugares estén muy próximos, intenta crear pequeños grupos de visitas eficientes.
+* Comprueba que la secuencia propuesta sea compatible con los horarios reales de apertura y cierre de ese día.
+
+Quiero que seas especialmente crítico con la palabra "imprescindible".
+
+Algo debe considerarse IMPRESCINDIBLE únicamente si posee suficiente interés como para justificar modificar el viaje para poder verlo.
+
+Al comenzar tu respuesta, resume en una frase cuál sería, según tu análisis, la estructura ideal del día completo.
