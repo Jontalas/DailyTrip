@@ -328,43 +328,93 @@ No existe base de datos SQL actualmente.
 
 # 4. ESTRUCTURA ACTUAL DEL PROYECTO
 
+> Este árbol es de mantenimiento manual: cada versión que añada o elimine un archivo
+> debe actualizarlo (§0.2 "archivos y funciones afectadas"). Si en algún momento no
+> coincide con el código real, el código real manda — pero avísalo y corrígelo.
+
 ```text
 DailyTrip/
 │
-├─ package.json              # scripts dev/build/start; deps runtime + devDeps de build
+├─ package.json              # scripts dev/build/start/test; deps runtime + devDeps de build
+├─ package-lock.json
 ├─ server.js                 # backend Express (lógica intacta desde v1.1.5)
 ├─ vite.config.js            # root: client/  ·  build.outDir: ../public  ·  proxy /api -> :3000
-├─ .env / .env.example
+├─ render.yaml                # despliegue en Render: build/start command, env vars, secretos sync:false
+├─ README.md                  # introducción breve orientada a quien clona el repo (no sustituye este documento)
+├─ .env / .env.example        # ver §5
+├─ .gitignore
+│
 ├─ data/
-│  └─ cache.json
+│  └─ cache.json              # caché persistente (§7); gitignored, se regenera en runtime
+│
 ├─ doc/
-│  ├─ APPLICATION_HANDOFF.md
-│  └─ legacy-ui/             # UI vanilla hasta v1.1.5, sólo referencia
-├─ scripts/
-│  └─ smoke.mjs              # test e2e Playwright del flujo principal
-├─ client/                   # FUENTE del frontend (Vite + Svelte), desde v1.2.0
+│  ├─ APPLICATION_HANDOFF.md  # este documento
+│  ├─ guidepromt.txt          # prompt de referencia (planificación exigente vía LLM+búsqueda web);
+│  │                          # inspiró el criterio de selección del asistente, ver §46.11
+│  ├─ legacy-ui/              # UI vanilla hasta v1.1.5, sólo referencia (index.html, app.js, styles.css)
+│  └─ screenshots/
+│
+├─ scripts/                   # todo se ejecuta con `node scripts/<archivo>`, no hay build propio
+│  ├─ regression.test.mjs     # estos 5 *.test.mjs son los que ejecuta `npm test` (node --test);
+│  ├─ route-search.test.mjs   # 67 tests en total a fecha de v1.2.48
+│  ├─ day-plan.test.mjs
+│  ├─ ai-curator.test.mjs
+│  ├─ geocode-rank.test.mjs
+│  ├─ regression-ui.mjs       # `npm run test:ui` — sirve `public/` + simula la API, sin servicios externos
+│  └─ smoke.mjs               # `node scripts/smoke.mjs [baseUrl]` — e2e con Playwright contra un server real
+│
+├─ lib/                       # lógica de SERVIDOR compartida/extraída de server.js, por subsistema
+│  ├─ base-search.js          # searchTolerance, nearbyBaseRoutes — validación de tolerancia/bases
+│  ├─ route-search.js         # descubrimiento de paradas en ruta: routeStopTarget, routeGeometryIndex,
+│  │                          # mergeRoutePlaces, selectRoutePlaces, searchRoutePlaces, pagedPlaces,
+│  │                          # subdividedPlaces, isRouteLandmark (§11)
+│  ├─ destination-options.js  # destinationScale/topInterest/latestPopulation — oferta según población
+│  ├─ place-content.js        # placeContent() — descripción/imagen/licencia de una ficha (§19)
+│  ├─ geocode-rank.js         # pickPlaceResult/NAME_PREFIX — puntúa resultados de Nominatim/Geoapify
+│  │                          # para lugares personalizados y `add_place` del asistente
+│  ├─ road-matrix.js          # roadMatrix() — matriz de tiempos/distancias por carretera + respaldo
+│  ├─ route-option-metrics.js # routeOptionMetrics() — desvío/tiempo extra de una propuesta (§13)
+│  ├─ day-routing.js          # routeDay() — orquesta dayStops/orderDay + OSRM para `/api/plan/day`
+│  ├─ ai-curator.js           # aiCuratePlaces() — curación/orden por IA de paradas y actividades (§46.8)
+│  └─ assistant.js            # askAssistant() — asistente conversacional: preguntas + function calling
+│                              # (tools) + criterio de selección del borrador (§46.9-§46.12)
+│
+├─ client/                    # FUENTE del frontend (Vite + Svelte), desde v1.2.0
 │  ├─ index.html
 │  └─ src/
 │     ├─ main.js
-│     ├─ app.css             # sistema de diseño (tokens)
-│     ├─ App.svelte          # orquestador + layout map-forward
+│     ├─ app.css              # sistema de diseño (tokens claro/oscuro, tipografía, glass, motion)
+│     ├─ App.svelte           # orquestador + layout map-forward + efectos de recálculo del día
 │     ├─ lib/
-│     │  ├─ api.js           # un método por endpoint del backend
-│     │  ├─ stores.js        # estado global (espejo de las variables de app.js)
-│     │  ├─ itinerary.js     # buildItinerary / approximateSchedule / isLunchViable (PORT VERBATIM)
-│     │  ├─ scoring.js       # preferencias e interés ajustado (PORT VERBATIM)
-│     │  ├─ format.js        # toMin/fromMin/fmt/haversine/approxLocalTravelMin
-│     │  └─ map.js           # controlador Leaflet (teselas, ruta, marcadores)
+│     │  ├─ api.js            # un método por endpoint del backend
+│     │  ├─ stores.js         # estado global (espejo de las variables de app.js v1.1.5 + estado nuevo)
+│     │  ├─ trip-state.js     # buildSnapshot/applySnapshot — guardar/cargar un viaje completo
+│     │  ├─ itinerary.js      # buildItinerary/approximateSchedule/isLunchViable — motor de horario (§25)
+│     │  ├─ day-plan.js       # dayStops/orderDay/daySignature — qué visitar y en qué orden (§46 varios)
+│     │  ├─ optimal-order.js  # optimalOrder() — TSP exacto hasta 12 nodos (programación dinámica)
+│     │  ├─ active-route.js   # ruta activa: geometría/km/duración reales de las visitas elegidas
+│     │  ├─ scoring.js        # preferencias e interés ajustado, incluida nota de la IA (§46.8)
+│     │  ├─ assistant.js      # describePlan/describeWarnings/describeOptions — contexto en texto
+│     │  │                    # para el asistente (§46.9-§46.12); nunca envía datos crudos al servidor
+│     │  ├─ format.js         # toMin/fromMin/fmt/haversine/approxLocalTravelMin
+│     │  ├─ map.js            # controlador Leaflet (teselas, ruta, marcadores)
+│     │  ├─ motion.js         # dur() — respeta prefers-reduced-motion en las transiciones
+│     │  ├─ tip.js            # use:tip — tooltip ligero como acción de Svelte
+│     │  └─ loading.js        # loadCategory() — conserva datos útiles si una consulta falla/degrada
 │     └─ components/
-│        ├─ MapCanvas.svelte      SearchPanel.svelte     BaseResults.svelte
-│        ├─ PreferencesBar.svelte OptionsPanel.svelte    OptionCard.svelte
-│        ├─ ItineraryPanel.svelte TimelineRow.svelte     Progress.svelte
-└─ public/                   # SALIDA de `vite build` (index.html + assets/). Servido por server.js.
+│        ├─ MapCanvas.svelte      SearchPanel.svelte      BaseResults.svelte
+│        ├─ PreferencesBar.svelte OptionsPanel.svelte     OptionCard.svelte
+│        ├─ ItineraryPanel.svelte TimelineRow.svelte      Progress.svelte
+│        ├─ AssistantPanel.svelte # chat del itinerario, vive dentro de ItineraryPanel (§46.9-§46.12)
+│        └─ MobileBar.svelte      # barra de tareas flotante en móvil/tablet (≤1024 px)
+│
+├─ public/                    # SALIDA de `vite build` (index.html + assets/). Servido por server.js.
+│                              # gitignored: no editar a mano, se regenera.
+└─ releases/                  # ZIPs empaquetados por versión (§42 paso 8). gitignored, sólo local.
 ```
 
-`vite build` hace `emptyOutDir` sobre `public/`: no editar `public/` a mano, se
-regenera. La carpeta `node_modules` incluye ahora devDeps de build (vite, svelte,
-plugin) y Playwright para el smoke test.
+`vite build` hace `emptyOutDir` sobre `public/`. La carpeta `node_modules` incluye
+devDeps de build (vite, svelte, plugin) y Playwright para los tests e2e.
 
 ---
 
@@ -2285,11 +2335,20 @@ La aplicación obtiene lugares, no inventario/precio/fecha real.
 
 No se realizan reservas automáticamente.
 
-## 39.7. Orden de actividades en destino
+## 39.7. Orden de actividades en destino — SUPERADA desde v1.2.21
 
-Actualmente conserva esencialmente el orden de selección.
+Esta limitación ya no es cierta: desde v1.2.21, `client/src/lib/optimal-order.js`
+(`optimalOrder()`) resuelve exactamente el orden de menor coste dirigido hasta 12
+nodos (programación dinámica por subconjuntos, tipo Held-Karp), respetando
+precedencias (comidas/check-in, actividades tras la llegada a la base, alojamiento al
+final). Con más de 12 nodos, `orderDay()` (`client/src/lib/day-plan.js`) usa esa
+solución exacta como punto de partida y sigue mejorándola por reinserciones sucesivas
+mientras algo lo reduzca, sin garantía de óptimo matemático a partir de ahí. Detalle
+completo en el changelog v1.2.21 (§43) y en `orderDay()`/`optimalOrder()`.
 
-No existe todavía optimización tipo TSP para minimizar trayectos.
+Limitación real que persiste: el objetivo que minimiza es tiempo de conducción
+(+ penalización horaria de comida/cena si hay restaurante elegido, desde v1.2.25), no
+tráfico en tiempo real ni ventanas horarias dinámicas de apertura de cada proveedor.
 
 ## 39.8. Transporte local
 
