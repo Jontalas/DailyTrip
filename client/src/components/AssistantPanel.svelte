@@ -14,7 +14,8 @@
     assistantMessages, assistantBusy,
     pools, selected, customStops, lunchOptions, departureTime, chosen, routeData, activeRoute,
     toggleRouteStop, toggleActivity, setLunch, setDinner, setHotel, setSkipLunch,
-    removeCustomStop, addCustomStopEnriched, setCustomMeal
+    removeCustomStop, addCustomStopEnriched, setCustomMeal,
+    excludedPlaces, excludePlace, includePlace
   } from "../lib/stores.js";
   import { describePlan, describeWarnings, describeOptions } from "../lib/assistant.js";
   import { api } from "../lib/api.js";
@@ -159,6 +160,23 @@
           return `No pude añadir «${q}».`;
         }
       }
+      case "exclude_place": {
+        const item = findById(args.id, $pools.route, $pools.activities, $pools.food, $pools.lodging, $lunchOptions, $customStops);
+        if (!item) return "No encontré ese lugar entre las opciones.";
+        if ($selected.route.some((x) => x.id === item.id)) toggleRouteStop(item);
+        if ($selected.activities.some((x) => x.id === item.id)) toggleActivity(item);
+        if ($selected.lunch?.id === item.id) setLunch(null);
+        if ($selected.dinner?.id === item.id) setDinner(null);
+        if ($selected.hotel?.id === item.id) setHotel(null);
+        excludePlace(item.id, item.name, args.reason);
+        return `Excluido: ${item.name}${args.reason ? ` (${args.reason})` : ""}. No se volverá a proponer.`;
+      }
+      case "include_place": {
+        const place = $excludedPlaces.find((x) => x.id === args.id);
+        if (!place) return "Ese lugar no estaba excluido.";
+        includePlace(args.id);
+        return `${place.name} vuelve a estar disponible.`;
+      }
       default:
         return null;
     }
@@ -193,7 +211,7 @@
         warningsText: describeWarnings(result),
         optionsText: describeOptions({
           pools: $pools, lunchOptions: $lunchOptions, selected: $selected,
-          customStops: $customStops, departureTime: $departureTime
+          customStops: $customStops, departureTime: $departureTime, excludedPlaces: $excludedPlaces
         })
       };
       const r = await api.assistantAsk({ question: q, context, history });
@@ -227,12 +245,29 @@
     <div class="assistant__body">
       <p class="assistant__hint">
         Pregunta por horarios, duraciones o el orden del día, o pide cambios: "cambia la cena a…",
-        "quita el museo y añade…", "sal a las 8". "✨ Generar un borrador" elige de golpe paradas,
-        comida, cena, alojamiento y actividades, siendo exigente (evita lo turístico/genérico) y
-        sin quitar lo que ya tengas puesto. Los cambios se aplican al momento (se pueden deshacer
-        igual que cualquier selección, desde las listas o el mapa). No busca en internet ni
-        inventa precios u horarios de apertura.
+        "quita el museo y añade…", "sal a las 8". Si algo ya no vale (cerrado, sin reservas, no te
+        convence), dilo así — "la Cueva de Nerja no tiene ya reservas, descártala" — y no se
+        volverá a proponer, ni en un borrador nuevo. "✨ Generar un borrador" elige de golpe
+        paradas, comida, cena, alojamiento y actividades, siendo exigente (evita lo
+        turístico/genérico) y sin quitar lo que ya tengas puesto. Los cambios se aplican al
+        momento (se pueden deshacer igual que cualquier selección, desde las listas o el mapa).
+        No busca en internet ni inventa precios u horarios de apertura.
       </p>
+      {#if $excludedPlaces.length}
+        <div class="assistant__excluded">
+          <span class="assistant__excluded-label">Descartados (no se proponen):</span>
+          {#each $excludedPlaces as p (p.id)}
+            <button
+              type="button"
+              class="chip"
+              onclick={() => includePlace(p.id)}
+              title={p.reason ? `Motivo: ${p.reason}. Pulsa para recuperarlo.` : "Pulsa para recuperarlo"}
+            >
+              {p.name} ✕
+            </button>
+          {/each}
+        </div>
+      {/if}
       {#if $assistantMessages.length}
         <div class="assistant__log scroll-y" bind:this={logEl}>
           {#each $assistantMessages as m, i (i)}
@@ -290,6 +325,23 @@
     white-space: nowrap;
   }
   .assistant__draftbtn:disabled { opacity: 0.5; }
+  .assistant__excluded {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+  }
+  .assistant__excluded-label { color: var(--text-faint); }
+  .assistant__excluded .chip {
+    padding: 3px 8px;
+    font-size: 11px;
+    color: var(--text-soft);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+  }
+  .assistant__excluded .chip:hover { color: var(--danger); border-color: var(--danger); }
   .assistant__chev {
     color: var(--text-faint);
     font-size: 10px;

@@ -2428,6 +2428,26 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.48 — Asistente conversacional, Fase 3.1: exclusión persistente de lugares
+
+- **Motivo.** El usuario preguntó directamente si podía decir "esta parada ya no tiene
+  reservas, no la incluyas, y regenera el borrador" — con la Fase 3 tal cual, la
+  respuesta era "no de forma fiable": se podía quitar una vez, pero nada impedía que un
+  borrador posterior la propusiera de nuevo (no había memoria persistente de rechazo).
+- **Qué.** Nuevas herramientas `exclude_place`/`include_place`: cuando el usuario dice
+  que un lugar ya no vale (cerrado, sin reservas, no le convence…), se deselecciona y
+  se añade a una lista de exclusión que se **quita por completo** de las opciones que
+  ve la IA en cualquier turno futuro, incluidos los borradores. No es una instrucción
+  de prompt que la IA "debería recordar": es un filtro estructural antes de construir
+  el prompt, así que es imposible que la IA lo vuelva a elegir mientras esté excluido.
+  Se persiste con el viaje guardado y se puede deshacer con un clic desde el panel.
+- **Verificado contra la API real reproduciendo el escenario exacto de la pregunta**:
+  excluir una parada por falta de reservas + regenerar el borrador completo → la
+  parada excluida no reaparece; el resto de la selección se completa con normalidad.
+- **Detalle completo, archivos y validación.** Ver §46.12.
+- **Validación.** `npm test` 67/67; `node --check`; `npm run build` limpio; prueba
+  manual end-to-end contra la API real de Gemini.
+
 ## v1.2.47 — Asistente conversacional, Fase 3: borrador automático del día
 
 - **Motivo.** Poder generar de un golpe una primera selección completa y exigente del
@@ -5768,3 +5788,71 @@ concluyó en el estudio de viabilidad: reusar el rubric, no el output.
 - **Validación.** `npm test` 67/67; `node --check`; `npm run build` limpio; pruebas
   manuales contra la API real de Gemini (borrador completo con pool mixto
   genérico/calidad, y borrador con selección previa que debía conservarse).
+
+## 46.12. Asistente conversacional — Fase 3.1: exclusión persistente de lugares (v1.2.48)
+
+Motivada por una pregunta directa del usuario: *"¿esto contempla que yo pueda decirle
+'la parada X ya no tiene reservas disponibles, no la incluyas, y genera el borrador de
+nuevo'"?* La respuesta honesta con lo que había hasta la v1.2.47 era **no de forma
+fiable**: se podía pedir "quita X" (funcionaba, vía `remove_route_stop`/`remove_activity`
+de §46.10), pero no existía memoria de "esto queda descartado para siempre" — nada
+distinguía "todavía no elegido" de "el usuario lo rechazó explícitamente", así que un
+borrador posterior podía volver a proponerlo (seguía en el pool, con buen interés, sin
+ninguna marca). Esta fase cierra ese hueco con una exclusión persistente de verdad.
+
+- **Diseño: filtrado estructural, no una instrucción de prompt.** La exclusión no
+  consiste en "pedirle a la IA que no lo proponga" (eso ya se probó insuficiente: un
+  simple recordatorio en el historial de conversación no es fiable si la conversación
+  avanza o se repite la petición más tarde). En su lugar, `describeOptions()`
+  (`client/src/lib/assistant.js`) **quita por completo** cualquier lugar excluido de
+  TODAS las listas de opciones antes de construir el prompt — el modelo no puede
+  elegirlo aunque quiera, porque no está en ningún sitio donde pueda leer su id. Se
+  lista aparte, en una sección "LUGARES EXCLUIDOS", sólo para que el modelo pueda
+  referenciarlo si el usuario pide deshacer la exclusión.
+- **Nuevo estado: `excludedPlaces`.** `client/src/lib/stores.js`: `excludedPlaces`
+  (array de `{id,name,reason}`) + `excludePlace(id,name,reason)` / `includePlace(id)`.
+  A diferencia de `assistantMessages` (conversación de sesión, no se persiste), SÍ se
+  guarda en el viaje (`trip-state.js`: nuevo campo `excludedPlaces` en
+  `buildSnapshot`/`applySnapshot`, retrocompatible — una instantánea antigua sin el
+  campo carga como `[]`). `resetPlan()` lo vacía al empezar una búsqueda nueva (los
+  ids pertenecen al descubrimiento de ESE corredor/destino).
+- **Nuevas herramientas.** `exclude_place({id,reason})`: si el lugar estaba
+  seleccionado (en cualquier categoría: parada, actividad, comida, cena, alojamiento)
+  lo deselecciona primero (llamando al mismo mutador que usaría un `remove_*`/`clear_*`
+  manual) y luego lo añade a `excludedPlaces`. `include_place({id})`: deshace una
+  exclusión. `SYSTEM_INSTRUCTIONS` en `lib/assistant.js` instruye explícitamente:
+  úsalo cuando el usuario diga que un lugar "ya no vale" por cualquier motivo (cerrado,
+  sin reservas, no interesa…); un simple "quítalo de esta selección" sin ese matiz
+  puede seguir resolviéndose con `remove_*`/`clear_*` sin excluirlo para siempre.
+- **UI.** Chips "Descartados (no se proponen): Nombre ✕" visibles en el panel del
+  asistente — pulsar uno lo recupera sin tener que pedirlo por chat. Texto de ayuda
+  actualizado con un ejemplo ("la Cueva de Nerja no tiene ya reservas, descártala").
+- **Verificado contra la API real, el escenario exacto de la pregunta.** (1) El
+  usuario dice "la Cueva de Nerja ya no tiene reservas disponibles, descártala" con la
+  Cueva ya seleccionada como parada → el modelo llama `exclude_place` (no un simple
+  `remove_route_stop`), con el motivo capturado. (2) Se regenera el borrador completo
+  (mismo pool, con la Cueva ya excluida) → la Cueva **no vuelve a aparecer** en las
+  7 acciones que propone el borrador; el resto de la selección (otras paradas,
+  actividad, cena, alojamiento) se completa con normalidad.
+- **Archivos afectados.** `client/src/lib/stores.js` (`excludedPlaces`,
+  `excludePlace`, `includePlace`, `resetPlan`); `client/src/lib/trip-state.js`
+  (persistencia); `client/src/lib/assistant.js` (`describeOptions` filtra y lista los
+  excluidos); `lib/assistant.js` (tools `exclude_place`/`include_place`, instrucción de
+  sistema); `client/src/components/AssistantPanel.svelte` (`runAction` para ambas
+  tools, chips de descartados, texto de ayuda).
+- **Nuevos invariantes.** Un lugar en `excludedPlaces` nunca aparece en `optionsText`
+  salvo en su propia sección "LUGARES EXCLUIDOS"; por tanto ninguna acción del modelo
+  (manual o de borrador) puede volver a seleccionarlo mientras siga excluido.
+- **Qué comportamiento anterior se conserva.** "Quita X" sin más contexto sigue
+  funcionando igual que en la Fase 2 (deselección puntual, sin exclusión permanente).
+- **Compatibilidad.** Instantáneas de viaje guardadas antes de esta versión cargan con
+  `excludedPlaces:[]` (ninguna exclusión), comportamiento idéntico al histórico.
+- **Limitaciones conocidas.** La exclusión es por `id` de la sesión de descubrimiento
+  actual: si el usuario vuelve a buscar la misma etapa desde cero (nueva búsqueda), el
+  descubrimiento puede generar el mismo lugar con un id distinto y la exclusión previa
+  (de un viaje ya cerrado por `resetPlan()`) no se traslada — hay que decirlo de nuevo
+  en la conversación nueva. No hay un "excluir por nombre" que persiga variantes del
+  mismo lugar con otro id.
+- **Validación.** `npm test` 67/67; `node --check`; `npm run build` limpio; prueba
+  manual end-to-end contra la API real de Gemini reproduciendo el escenario exacto
+  preguntado por el usuario (excluir por falta de reservas + regenerar borrador).

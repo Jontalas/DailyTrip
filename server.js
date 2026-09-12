@@ -40,7 +40,7 @@ const OVERPASS_ENDPOINTS=[
 const GEOAPIFY_KEY=(process.env.GEOAPIFY_API_KEY||"").trim();
 const GOOGLE_KEY=(process.env.GOOGLE_PLACES_API_KEY||"").trim();
 const GEMINI_KEY=(process.env.GEMINI_API_KEY||"").trim();
-const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.47 (personal-use)";
+const USER_AGENT=process.env.APP_USER_AGENT||"TravelPlannerPersonal/1.2.48 (personal-use)";
 const DEBUG_EXTERNAL=process.env.DEBUG_EXTERNAL==="1";
 const debug=(...a)=>{if(DEBUG_EXTERNAL)console.warn(...a);};
 
@@ -2186,4 +2186,4 @@ app.post("/api/plan/route-via",async(req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Travel Planner 1.2.47 en http://localhost:${PORT}`));
+app.listen(PORT,()=>console.log(`Travel Planner 1.2.48 en http://localhost:${PORT}`));

@@ -96,6 +96,21 @@ export const optionFilter = writable("");
 export const assistantMessages = writable([]);
 export const assistantBusy = writable(false);
 
+/* Lugares excluidos por el usuario a través del chat (Fase 3.1, ver doc §46.12):
+   "esa parada ya no tiene reservas, no la incluyas" debe recordarse más allá de
+   un solo turno, o un futuro borrador podría volver a proponerla. `{id,name,reason}`.
+   A diferencia de `assistantMessages`, SÍ se guarda con el viaje (`trip-state.js`):
+   es un dato sobre el plan (qué no vale), no sobre la conversación. */
+export const excludedPlaces = writable([]);
+
+export function excludePlace(id, name, reason = "") {
+  if (!id) return;
+  excludedPlaces.update((list) => (list.some((x) => x.id === id) ? list : [...list, { id, name: name || id, reason: String(reason || "").trim() }]));
+}
+export function includePlace(id) {
+  excludedPlaces.update((list) => list.filter((x) => x.id !== id));
+}
+
 /* ---- Helpers de duración (portados de app.js) --------------------------- */
 export function recommendedMinutes(item) {
   return Math.max(1, Math.round(Number(item?.durationMin) || 60));
@@ -141,6 +156,7 @@ export function resetPlan() {
   optionFilter.set("");
   revealOptionId.set(null);
   assistantMessages.set([]);
+  excludedPlaces.set([]);
 }
 
 /* ---- Mutadores de selección (equivalen a bindSelections() de app.js) ---- */

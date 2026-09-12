@@ -13,7 +13,7 @@ import { get } from "svelte/store";
 import {
   searchContext, baseResults, chosen, routeData, activeRoute,
   pools, selected, customDurations, preferences, departureTime,
-  customStops, openOptionGroup, emptyPools, emptySelected
+  customStops, openOptionGroup, emptyPools, emptySelected, excludedPlaces
 } from "./stores.js";
 
 export const TRIP_VERSION = 1;
@@ -48,7 +48,8 @@ export function buildSnapshot(extra = {}) {
     customStops: get(customStops) || [],
     customDurations: [...get(customDurations)],
     preferences: [...get(preferences)],
-    departureTime: get(departureTime) || "09:30"
+    departureTime: get(departureTime) || "09:30",
+    excludedPlaces: get(excludedPlaces) || []
   };
 }
 
@@ -71,6 +72,7 @@ export function applySnapshot(s) {
   customDurations.set(new Map(s.customDurations || []));
   preferences.set(new Set(s.preferences || []));
   departureTime.set(s.departureTime || "09:30");
+  excludedPlaces.set(s.excludedPlaces || []);
   openOptionGroup.set(null);
 }
 
