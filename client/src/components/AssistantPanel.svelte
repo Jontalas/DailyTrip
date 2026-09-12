@@ -164,13 +164,28 @@
     }
   }
 
-  async function send() {
-    const q = text.trim();
+  // Fase 3 (borrador automático, ver doc §46.11): pide una selección completa del
+  // día por el MISMO mecanismo de la Fase 2 (function calling), sin ruta de código
+  // nueva. El criterio de exigencia (evitar lo turístico/genérico, priorizar lo
+  // excepcional, no seleccionarlo todo) vive en `SYSTEM_INSTRUCTIONS` de
+  // `lib/assistant.js`, inspirado en doc/guidepromt.txt.
+  const DRAFT_PROMPT =
+    "Genera un primer borrador completo y exigente para todo el día: elige las mejores paradas " +
+    "en ruta, dónde comer, qué actividades hacer, dónde cenar y dónde alojarse, completando lo " +
+    "que ya tenga elegido sin quitarlo. Prioriza calidad sobre cantidad.";
+
+  function generateDraft() {
+    open = true;
+    send(DRAFT_PROMPT);
+  }
+
+  async function send(forcedQuestion) {
+    const q = (forcedQuestion ?? text).trim();
     if (!q || $assistantBusy) return;
     error = "";
     const history = $assistantMessages.slice(-8).map(({ role, text }) => ({ role, text }));
     assistantMessages.update((m) => [...m, { role: "user", text: q }]);
-    text = "";
+    if (forcedQuestion == null) text = "";
     assistantBusy.set(true);
     try {
       const context = {
@@ -199,17 +214,24 @@
 </script>
 
 <div class="assistant">
-  <button type="button" class="assistant__toggle" onclick={() => (open = !open)} aria-expanded={open}>
-    <span>💬 Preguntar sobre este plan</span>
-    <span class="assistant__chev" class:on={open}>▸</span>
-  </button>
+  <div class="assistant__bar">
+    <button type="button" class="assistant__toggle" onclick={() => (open = !open)} aria-expanded={open}>
+      <span>💬 Preguntar sobre este plan</span>
+      <span class="assistant__chev" class:on={open}>▸</span>
+    </button>
+    <button type="button" class="assistant__draftbtn" onclick={generateDraft} disabled={$assistantBusy}>
+      ✨ Generar un borrador
+    </button>
+  </div>
   {#if open}
     <div class="assistant__body">
       <p class="assistant__hint">
         Pregunta por horarios, duraciones o el orden del día, o pide cambios: "cambia la cena a…",
-        "quita el museo y añade…", "sal a las 8". Los cambios se aplican al momento (se pueden
-        deshacer igual que cualquier selección, desde las listas o el mapa). No busca en internet
-        ni inventa precios u horarios de apertura.
+        "quita el museo y añade…", "sal a las 8". "✨ Generar un borrador" elige de golpe paradas,
+        comida, cena, alojamiento y actividades, siendo exigente (evita lo turístico/genérico) y
+        sin quitar lo que ya tengas puesto. Los cambios se aplican al momento (se pueden deshacer
+        igual que cualquier selección, desde las listas o el mapa). No busca en internet ni
+        inventa precios u horarios de apertura.
       </p>
       {#if $assistantMessages.length}
         <div class="assistant__log scroll-y" bind:this={logEl}>
@@ -242,15 +264,32 @@
     border-top: 1px solid var(--line);
     padding-top: var(--sp-3);
   }
+  .assistant__bar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
   .assistant__toggle {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     font-size: var(--fs-13);
     font-weight: 700;
     color: var(--text);
   }
+  .assistant__draftbtn {
+    flex: none;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent-text);
+    background: var(--accent);
+    border-radius: var(--r-pill);
+    white-space: nowrap;
+  }
+  .assistant__draftbtn:disabled { opacity: 0.5; }
   .assistant__chev {
     color: var(--text-faint);
     font-size: 10px;

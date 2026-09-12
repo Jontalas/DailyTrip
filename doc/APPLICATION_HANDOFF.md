@@ -2428,6 +2428,23 @@ Al crearla:
 
 # 43. CHANGELOG DE CONTINUIDAD
 
+## v1.2.47 — Asistente conversacional, Fase 3: borrador automático del día
+
+- **Motivo.** Poder generar de un golpe una primera selección completa y exigente del
+  día (paradas, comida, cena, alojamiento, actividades), en vez de elegir todo a mano.
+- **Qué.** Botón "✨ Generar un borrador" en el panel del asistente. No es infraestructura
+  nueva: manda una petición fija por el mismo mecanismo de la Fase 2 (function
+  calling), con un nuevo párrafo de criterio de selección exigente en el prompt
+  (inspirado en `doc/guidepromt.txt`: evitar lo turístico/genérico, priorizar lo
+  excepcional, elegir con moderación, respetar lo ya elegido).
+- **Verificado contra la API real** con un pool mixto de opciones genéricas (McDonald's,
+  bar turístico, centro comercial…) y de calidad (cocina local, hitos históricos…): el
+  modelo evitó todas las genéricas y no marcó de más; conservó las selecciones previas
+  al completar el resto.
+- **Detalle completo, archivos y validación.** Ver §46.11.
+- **Validación.** `npm test` 67/67; `node --check`; `npm run build` limpio; pruebas
+  manuales contra la API real de Gemini.
+
 ## v1.2.46 — Asistente conversacional, Fase 2: aplicar cambios por chat
 
 - **Motivo.** Poder pedir cambios (comida/cena/alojamiento, paradas, actividades, hora
@@ -5689,3 +5706,65 @@ Mismo endpoint (`POST /api/assistant/ask`), mismo panel (`AssistantPanel.svelte`
   pregunta pura sin acciones, cambiar hora de salida, quitar algo no seleccionado,
   añadir algo no seleccionado, quitar algo sí seleccionado, y multi-cambio de 3
   acciones) y contra `POST /api/assistant/ask` con el servidor real levantado.
+
+## 46.11. Asistente conversacional — Fase 3: borrador automático del día (v1.2.47)
+
+Añade el botón "✨ Generar un borrador" al panel del asistente. **No es una ruta de
+código nueva**: manda una petición ya redactada por el mismo mecanismo de la Fase 2
+(function calling), así que reutiliza el 100% de la validación de ids, ejecución y
+guardarraíles de §46.10. Lo único nuevo es (a) el texto fijo de la petición y (b) un
+párrafo de "criterio de selección" añadido a `SYSTEM_INSTRUCTIONS`, importando la
+filosofía de exigencia de `doc/guidepromt.txt` (§ conversación de diseño previa) sin
+adoptar su formato de salida ni su dependencia de búsqueda web — exactamente lo que se
+concluyó en el estudio de viabilidad: reusar el rubric, no el output.
+
+- **Motivo.** El usuario pidió, tras las Fases 1 y 2, poder generar un primer borrador
+  completo del día automáticamente en vez de elegir todo a mano.
+- **Cómo funciona.** `AssistantPanel.svelte`: `generateDraft()` abre el panel y llama a
+  `send(DRAFT_PROMPT)`, con `DRAFT_PROMPT` pidiendo elegir paradas, comida, cena,
+  alojamiento y actividades "completando lo que ya tenga elegido sin quitarlo,
+  priorizando calidad sobre cantidad". `send()` se refactorizó para aceptar una
+  pregunta forzada (`forcedQuestion`) en vez de leer sólo el campo de texto, así el
+  botón reutiliza literalmente el mismo camino que teclear y pulsar "Preguntar".
+  El `optionsText` que ya se manda siempre (§46.10) ya incluye TODAS las categorías
+  (paradas, actividades, comida, cena, alojamiento) con su estado actual, así que no
+  hizo falta ningún contexto nuevo para que el modelo pueda decidir sobre las cinco a
+  la vez.
+- **Criterio de selección (`SYSTEM_INSTRUCTIONS` en `lib/assistant.js`).** Nuevo
+  párrafo, aplicado siempre (no sólo al borrador): prioriza lo excepcional/singular
+  sobre lo cercano o con valoraciones genéricas; evita restaurantes turísticos o
+  cadenas si hay alternativa de cocina local; usa el criterio "¿me arrepentiría de
+  pasar cerca sin verlo?"; ante un borrador completo, elige con moderación (orientativo
+  3-6 paradas, 2-4 actividades, una comida/cena/alojamiento) en vez de seleccionarlo
+  todo; respeta siempre lo ya elegido por el usuario (completa, no sustituye ni quita
+  sin que se pida explícitamente).
+- **Verificado contra la API real (no sólo en teoría).** Con un pool sintético que
+  mezclaba deliberadamente opciones "genéricas" (McDonald's, un bar turístico junto a
+  la playa, un centro comercial, un área de servicio, un hostal barato) y "de calidad"
+  (cocina tradicional/producto local, hitos históricos, un hotel distintivo): el
+  modelo evitó TODAS las genéricas y eligió sólo las de calidad, con una selección
+  moderada (7 acciones: 2 paradas, comida, 2 actividades, cena, alojamiento) en vez de
+  marcarlo todo. En una segunda prueba con paradas/actividades ya elegidas de
+  antemano, el borrador las conservó (0 llamadas a `remove_*` sobre ellas) y sólo
+  completó lo que faltaba.
+- **`maxOutputTokens` subido de 500 a 1024** en `lib/assistant.js` (un borrador
+  completo puede devolver hasta ~10 `functionCall` en una sola respuesta; con 500 se
+  arriesgaba a cortar la lista a mitad).
+- **Archivos afectados.** `lib/assistant.js` (párrafo de criterio de selección,
+  `maxOutputTokens`); `client/src/components/AssistantPanel.svelte` (`DRAFT_PROMPT`,
+  `generateDraft()`, `send(forcedQuestion)`, botón "✨ Generar un borrador").
+- **Nuevos invariantes.** Ninguno nuevo a nivel de ejecución: el borrador se ejecuta
+  exactamente con las mismas reglas de `runAction()` que cualquier acción manual por
+  chat (§46.10) — mismos `add_*`/`remove_*` sin efecto si el estado ya coincide, mismo
+  guardarraíl de ids.
+- **Impacto en UI/UX.** Un botón nuevo junto al de "💬 Preguntar sobre este plan"; el
+  texto de ayuda lo menciona. Sin cambios de layout.
+- **Limitaciones conocidas.** El criterio de exigencia depende de que los nombres de
+  las opciones den pistas suficientes (p. ej. "cocina tradicional" en el nombre ayudó
+  en la prueba); con nombres más neutros el modelo decide con menos información, igual
+  que decidiría un guía humano con sólo una lista de nombres. Sigue sin haber
+  confirmación "¿seguro?" antes de aplicar el borrador — se puede deshacer cualquier
+  elección desde las listas o el mapa, igual que en la Fase 2.
+- **Validación.** `npm test` 67/67; `node --check`; `npm run build` limpio; pruebas
+  manuales contra la API real de Gemini (borrador completo con pool mixto
+  genérico/calidad, y borrador con selección previa que debía conservarse).
