@@ -1,6 +1,6 @@
 # Travel Planner — Documento maestro de continuidad de desarrollo
 
-**Versión de aplicación documentada:** 1.2.23  
+**Versión de aplicación documentada:** 1.2.48  
 **Estado del documento:** fuente de verdad para continuar el desarrollo  
 **Objetivo del documento:** permitir que una IA de desarrollo, sin contexto previo de la conversación, pueda comprender con precisión qué hace la aplicación, por qué está diseñada así, qué decisiones son obligatorias, qué problemas ya aparecieron y cuál es exactamente el punto actual del proyecto.
 
@@ -378,7 +378,8 @@ Variables actuales:
 PORT
 GEOAPIFY_API_KEY
 GOOGLE_PLACES_API_KEY
-GEMINI_API_KEY          # opcional: curación por IA (aditiva). Ver §46.8.
+GEMINI_API_KEY          # opcional: curación por IA (§46.8) Y asistente conversacional
+                        # (§46.9-§46.12). Aditivo en ambos casos; misma clave para los dos.
 GEMINI_MODEL            # opcional: por defecto gemini-flash-lite-latest
 NOMINATIM_URL
 OSRM_URL
@@ -405,10 +406,19 @@ Puede estar sin configurar.
 
 ## Gemini (GEMINI_API_KEY / GEMINI_MODEL)
 
-Curación por IA **aditiva** (v1.2.33). Sin clave, el descubrimiento funciona
-igual. La clave está en el `.env` entregado y como secreto `sync:false` en
-Render. **No copiar su valor a documentación, logs, UI ni repos.** Detalle de
-diseño y guardarraíles en §46.8.
+Misma clave, dos usos independientes, ambos **aditivos** (sin clave, el resto de la
+app funciona igual):
+
+1. Curación por IA de paradas/actividades (v1.2.33). Detalle de diseño y
+   guardarraíles en §46.8. Ver también §6.6 (ficha de proveedor).
+2. Asistente conversacional del itinerario (v1.2.45-v1.2.48): responde preguntas
+   sobre el plan y puede aplicar cambios por chat (comida/cena/alojamiento, paradas,
+   actividades, hora de salida, un borrador completo del día, exclusión persistente
+   de lugares). Detalle en §46.9 (preguntas), §46.10 (aplicar cambios), §46.11
+   (borrador automático), §46.12 (exclusión persistente).
+
+La clave está en el `.env` entregado y como secreto `sync:false` en Render.
+**No copiar su valor a documentación, logs, UI ni repos.**
 
 ## DEBUG_EXTERNAL
 
@@ -590,6 +600,31 @@ Función:
 - `overpassQuick()`
 
 No volver a construir cadenas largas de múltiples servidores × múltiples intentos × múltiples puntos secuenciales.
+
+## 6.6. Gemini (Google AI)
+
+Único proveedor de esta lista que **no** aporta datos geográficos/turísticos por sí
+mismo: nunca es fuente de coordenadas, horarios ni precios (guardarraíl §2.4/§2.5,
+igual que el resto). Aporta juicio/orden sobre datos que YA vienen de los proveedores
+anteriores. Server-side, vía REST directo (`generativelanguage.googleapis.com`, sin
+dependencia npm), clave `GEMINI_API_KEY` (secreto), modelo por defecto
+`gemini-flash-lite-latest` (`GEMINI_MODEL` lo sobrescribe). Totalmente aditivo: sin
+clave configurada, toda la app funciona igual, sin ninguna de las dos funciones
+siguientes.
+
+Dos usos, dos módulos, sin relación de dependencia entre ellos:
+
+- **`lib/ai-curator.js`** — cura y ordena paradas/actividades ya descubiertas
+  (`aiCuratePlaces()`, salida JSON con schema fijo: nombre + nota 0-100 + motivo).
+  Detalle en §46.8.
+- **`lib/assistant.js`** — asistente conversacional del itinerario: responde
+  preguntas (§46.9) y, desde la Fase 2, puede pedir cambios reales usando function
+  calling de Gemini (§46.10): el modelo sólo propone llamadas a herramientas
+  (`actions`), el SERVIDOR nunca las ejecuta — las ejecuta y valida el CLIENTE,
+  llamando a las mismas funciones que usan los botones de la UI. Incluye un botón de
+  borrador automático del día con criterio de selección exigente (§46.11) y exclusión
+  persistente de lugares rechazados (§46.12, filtrado estructural: un lugar excluido
+  desaparece de las opciones que ve el modelo, no es sólo "que lo recuerde").
 
 ---
 
